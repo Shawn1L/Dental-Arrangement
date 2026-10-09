@@ -56,12 +56,13 @@ function fit() {
   const aspect=viewport.clientWidth/viewport.clientHeight;
   radius=Math.max(projectedHeight/2,projectedWidth/2/aspect,0.001)*1.45;
   const direction=camera.position.clone().sub(controls.target).normalize();
-  controls.target.copy(center); camera.position.copy(center).addScaledVector(direction,radius*4); camera.near=Math.max(radius/10000,0.00001); camera.far=radius*100; camera.zoom=1; resize(); controls.update();
+  const distance=Math.max(size.length()*2,radius*4);
+  controls.target.copy(center); camera.position.copy(center).addScaledVector(direction,distance); camera.near=Math.max(distance/100000,0.00001); camera.far=Math.max(size.length()*10,radius*100); camera.zoom=1; resize(); controls.update();
   $('dimensions').textContent = size.toArray().map(v=>v.toFixed(1)).join(' × ')+' · STL 单位';
 }
 const directions: Record<string,number[]> = { front:[0,0,1],right:[1,0,0],left:[-1,0,0],back:[0,0,-1],upper:[0,-1,0.001],lower:[0,1,0.001],oblique:[0,-0.55,1] };
 function setView(id: string) { activeView=id; const d=directions[id]; controls.enableDamping=false;controls.update();camera.up.set(0,1,0);camera.position.copy(controls.target).add(new THREE.Vector3(...d).normalize().multiplyScalar(radius*4)); controls.update();controls.enableDamping=true; document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{const active=b.dataset.view===id;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));}); fit(); }
-controls.addEventListener('start',()=>document.querySelectorAll('[data-view]').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-pressed','false');}));
+renderer.domElement.addEventListener('pointerdown',event=>{if(event.button===0&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey)document.querySelectorAll('[data-view]').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-pressed','false');});});
 function applyVisibility() { const filter=$<HTMLSelectElement>('filter').value; for(const model of models) model.mesh.visible=model.enabled&&(filter==='all'||model.jaw===filter); const visible=models.filter(m=>m.mesh.visible); $('status').textContent = loading ? '正在读取模型…' : visible.length ? `${visible.length} 个模型 · ${visible.reduce((s,m)=>s+m.triangles,0).toLocaleString()} 个三角面` : models.length ? '当前筛选下没有可见模型' : '等待导入 STL'; $('empty').hidden=!!models.length || !!loading; }
 function renderList() {
   $('model-count').textContent=`${models.length} 个模型`; $('models').replaceChildren();
