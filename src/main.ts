@@ -9,17 +9,21 @@ const svg = (body: string) => `<svg viewBox="0 0 32 32" fill="none" stroke="curr
 const arch = '<path d="M7 26V14a9 9 0 0 1 18 0v12h-4V14a5 5 0 0 0-10 0v12z"/>';
 const bite = '<path d="M5 11c6 1 16 1 22-2v5c-7 2-16 2-22 1zM5 21c6-1 16-1 22 1v4c-7-1-16-1-22 0z"/>';
 const views = [ ['upper','上颌面',arch], ['front','正面',bite], ['right','右侧',bite], ['oblique','仰视',bite], ['left','左侧',bite], ['back','后视',bite], ['lower','下颌面','<g transform="rotate(180 16 16)">'+arch+'</g>'] ];
+const steps = ['模型预处理', '分牙', '初始位模型', '治疗计划', '目标位', '分步', '附件'];
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
+  <header class="workflow-header"><div class="workflow-brand">${svg(arch)}<span>STL <b>STUDIO</b></span></div><nav class="steps" aria-label="工作流程步骤">${steps.map((name,index)=>`<button class="step ${index===0?'active':''}" data-step="${name}" aria-pressed="${index===0}"><span class="step-number">${index+1}</span><span>${name}</span></button>${index<steps.length-1?'<span class="step-arrow" aria-hidden="true">›</span>':''}`).join('')}</nav></header>
+  <nav class="feature-bar" aria-label="预处理功能"><button data-feature="网格">${svg('<rect x="6" y="6" width="20" height="20" rx="1"/><path d="M6 13h20M6 20h20M13 6v20M20 6v20"/>')}<span>网格</span></button><button data-feature="咬合碰撞">${svg(bite)}<span>咬合碰撞</span></button><button data-feature="模型调整">${svg('<path d="M6 9h20M6 16h20M6 23h20"/><circle cx="12" cy="9" r="3" fill="#3d3d3d"/><circle cx="21" cy="16" r="3" fill="#3d3d3d"/><circle cx="12" cy="23" r="3" fill="#3d3d3d"/>')}<span>模型调整</span></button></nav>
+  <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="STL 三维查看器"></main>
-  <header class="brand"><span class="brand-mark">${svg(arch)}</span><div><strong>STL <span>STUDIO</span></strong><small>牙模可视化工作台</small></div></header>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
-  <div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="导入 STL">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>导入 STL</span></button></div>
+  <div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="上传 STL">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>上传 STL</span></button></div>
   <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 添加模型</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 文件在本地处理</p></aside>
-  <section id="empty" hidden><span class="empty-icon">${svg(arch)}</span><h1>把模型放到这里</h1><p>拖入 STL 文件，开始查看你的三维模型</p><button id="empty-import" class="primary">选择 STL 文件</button><button id="demo" class="text-button">加载上下颌示例</button></section>
-  <div id="drop-overlay" hidden>释放文件，导入 STL 模型</div>
-  <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">准备加载示例</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>滚轮缩放</div><span id="dimensions">STL 坐标单位</span></footer>
+  <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>上传你的牙模</h1><p>选择或拖入 STL 文件，开始模型预处理可视化<br/>支持同时上传上下颌模型，文件仅在本地读取</p><button id="empty-import" class="primary">选择 STL 文件</button><small>支持 ASCII / 二进制 STL · 单文件最大 150 MB</small></section>
+  <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待上传 STL</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>滚轮缩放</div><span id="dimensions">STL 坐标单位</span></footer>
   <div class="bottom-tools"><button id="fit" class="icon-button" title="适应窗口（F）" aria-label="适应窗口">${svg('<path d="M12 6H6v6m14-6h6v6M6 20v6h6m14-6v6h-6"/>')}</button><button id="reset" class="icon-button" title="恢复初始视图" aria-label="恢复初始视图">${svg('<path d="M7 13a10 10 0 1 1 1 12M7 5v8h8"/>')}</button><span class="divider"></span><button id="screenshot" class="icon-button" title="导出 PNG 截图" aria-label="导出 PNG 截图">${svg('<path d="M4 10h7l2-4h6l2 4h7v16H4z"/><circle cx="16" cy="18" r="5"/>')}</button></div>
-  <div id="toast" role="alert" hidden></div><input id="file-input" type="file" accept=".stl" multiple hidden/>`;
+  </section>
+  <section id="development" hidden aria-label="开发中"><div class="development-content"><span class="development-icon">${svg('<path d="M8 11 3 16l5 5m16-10 5 5-5 5M19 7l-6 18"/>')}</span><span class="development-badge">开发中</span><h1 id="development-title"></h1><p>该功能还在开发中</p><button id="back-preprocessing" class="primary">返回模型预处理</button></div></section>
+  <div id="drop-overlay" hidden>释放文件，上传 STL 模型</div><div id="toast" role="alert" hidden></div><input id="file-input" type="file" accept=".stl" multiple hidden/>`;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const viewport = $('viewport');
@@ -35,6 +39,25 @@ for (const [x,y,z,power] of [[-60,80,100,2.5],[70,20,40,1.3],[0,0,-100,1]]) { co
 const camera = new THREE.OrthographicCamera(-60,60,40,-40,0.01,10000);
 camera.position.set(0,0,200);
 const controls = new OrbitControls(camera, renderer.domElement);
+function selectStep(name: string, feature?: string) {
+  const preprocessing = name === steps[0] && !feature;
+  $('workspace').hidden = !preprocessing;
+  $('development').hidden = preprocessing;
+  $('development-title').textContent = feature || name;
+  controls.enabled = preprocessing;
+  if(preprocessing){resize();if(pendingFit)fit();}
+  document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach(button=>{
+    const selected=button.dataset.step===name;
+    button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button=>{
+    const selected=button.dataset.feature===feature;
+    button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));
+  });
+}
+document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach(button=>button.onclick=()=>selectStep(button.dataset.step!));
+document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button=>button.onclick=()=>selectStep(steps[0],button.dataset.feature));
+$('back-preprocessing').onclick=()=>selectStep(steps[0]);
 controls.enableDamping = true; controls.dampingFactor = 0.09; controls.minZoom = 0.08; controls.maxZoom = 25;
 controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePanning = true;
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
@@ -42,12 +65,14 @@ controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, R
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
 const loader = new STLLoader();
 type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number };
-const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0;
+const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
-function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; renderer.setSize(w,h); camera.left=-radius*w/h; camera.right=radius*w/h; camera.top=radius; camera.bottom=-radius; camera.updateProjectionMatrix(); }
+function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; if(!w || !h)return;renderer.setSize(w,h); camera.left=-radius*w/h; camera.right=radius*w/h; camera.top=radius; camera.bottom=-radius; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(viewport);
 function visibleBounds() { group.updateMatrixWorld(true); const bounds=new THREE.Box3(); for(const model of models) if(model.mesh.visible) bounds.union(new THREE.Box3().setFromObject(model.mesh)); return bounds; }
 function fit() {
+  if(!viewport.clientWidth || !viewport.clientHeight){pendingFit=true;return;}
+  pendingFit=false;
   const bounds=visibleBounds(); if(bounds.isEmpty()) return;
   const center=bounds.getCenter(new THREE.Vector3()); const size=bounds.getSize(new THREE.Vector3());
   camera.updateMatrixWorld(); const right=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0); const up=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,1);
@@ -85,7 +110,7 @@ function addBuffer(buffer: ArrayBuffer, name: string) {
   const material=new THREE.MeshStandardMaterial({color:0xc7a775,roughness:0.65,metalness:0,side:THREE.DoubleSide,opacity,transparent:opacity<1,depthWrite:opacity===1,flatShading:surface==='flat',wireframe:surface==='wire'});
   const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles});
 }
-async function importFiles(files: File[]) { loading++;applyVisibility();for(const file of files) { if(!/\.stl$/i.test(file.name)){toast(`${file.name}：仅支持 STL 文件`);continue;}if(file.size>150*1024*1024){toast(`${file.name}：文件超过 150 MB`);continue;}try{addBuffer(await file.arrayBuffer(),file.name);}catch(e){toast(`${file.name}：${(e as Error).message}`);} } loading--;renderList();fit(); }
+async function importFiles(files: File[]) { if(!files.length)return;selectStep(steps[0]);loading++;applyVisibility();let added=0;for(const file of files) { if(!/\.stl$/i.test(file.name)){toast(`${file.name}：仅支持 STL 文件`);continue;}if(file.size>150*1024*1024){toast(`${file.name}：文件超过 150 MB`);continue;}try{addBuffer(await file.arrayBuffer(),file.name);added++;}catch(e){toast(`${file.name}：${(e as Error).message}`);} } loading--;if(added)$<HTMLSelectElement>('filter').value='all';renderList();fit(); }
 const input=$<HTMLInputElement>('file-input');input.onchange=()=>{void importFiles(Array.from(input.files||[]));input.value='';};
 for(const id of ['import','add-model','empty-import']) $(id).onclick=()=>input.click();
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view!));
@@ -98,7 +123,5 @@ $('surface').onchange=()=>{for(const m of models){m.mesh.material.flatShading=$<
 $('opacity').oninput=()=>{const value=Number($<HTMLInputElement>('opacity').value);$('opacity-value').textContent=value+'%';for(const m of models){m.mesh.material.opacity=value/100;m.mesh.material.transparent=value<100;m.mesh.material.depthWrite=value===100;}};
 $('screenshot').onclick=()=>{renderer.render(scene,camera);renderer.domElement.toBlob(blob=>{if(!blob){toast('截图失败');return;}const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`STL-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});};
 let dragDepth=0;window.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();dragDepth++;$('drop-overlay').hidden=false;}});window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('drop-overlay').hidden=true;});window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('drop-overlay').hidden=true;void importFiles(Array.from(e.dataTransfer?.files||[]));});
-window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)return;if(e.key.toLowerCase()==='f')fit();});
-async function loadDemo() { if(loading)return;loading++;applyVisibility();let added=0;for(const [file,name] of [['upper.stl','示例 · 上颌模型.stl'],['lower.stl','示例 · 下颌模型.stl']]){if(models.some(m=>m.name===name))continue;try{const response=await fetch(`${import.meta.env.BASE_URL}demo/${file}`);if(!response.ok)throw new Error('示例文件不可用');addBuffer(await response.arrayBuffer(),name);added++;}catch(e){toast((e as Error).message);}}loading--;renderList();if(added)setView('front'); }
-$('demo').onclick=()=>void loadDemo();
-renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,camera);});resize();void loadDemo();
+window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || $('workspace').hidden)return;if(e.key.toLowerCase()==='f')fit();});
+renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderer.render(scene,camera);}});resize();applyVisibility();
