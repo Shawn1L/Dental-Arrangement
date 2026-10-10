@@ -19,3 +19,4 @@
 #development h1{font-weight:500;font-size:25px;letter-spacing:2px;margin:17px 0 12px}#development p{font-size:13px;color:#98a1ab;margin-bottom:29px}#development .primary{margin:auto;font-size:12px}
 @media(max-width:1100px){.workflow-brand{padding:0 16px}.workflow-brand span{display:none}.steps{padding-right:12px}.step{padding:0 12px;font-size:12px}}
 @media(max-width:760px){.workflow-brand{display:none}.steps{padding:0 8px}.step{padding:0 12px}.step-arrow{font-size:20px;padding:0 2px}.step-number{width:17px;height:17px;font-size:9px}.feature-bar{padding:0 8px}.feature-bar button{min-width:65px}}
+@media(max-width:1100px){.top-actions{top:94px}.top-actions .primary span{display:inline}.top-actions .primary{padding:10px 12px}#panel{top:147px;max-height:calc(100% - 225px)}}
