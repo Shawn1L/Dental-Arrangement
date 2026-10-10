@@ -1,0 +1,41 @@
+export function clearModels(group, models) {
+  for (const model of models) {
+    group.remove(model.mesh);
+    model.mesh.geometry.dispose();
+    model.mesh.material.dispose();
+  }
+  models.length = 0;
+}
+
+// Only the latest selection may add meshes or update the loading state.
+export function createModelImporter({ clear, add, onStart, onFinish, onError }) {
+  let generation = 0;
+  return async function importFiles(files) {
+    if (!files.length) return;
+    const current = ++generation;
+    clear();
+    onStart();
+    let added = 0;
+    for (const file of files) {
+      if (current !== generation) return;
+      if (!/\.(stl|obj)$/i.test(file.name)) {
+        onError(`${file.name}：仅支持 STL / OBJ 文件`);
+        continue;
+      }
+      if (file.size > 150 * 1024 * 1024) {
+        onError(`${file.name}：文件超过 150 MB`);
+        continue;
+      }
+      try {
+        const buffer = await file.arrayBuffer();
+        if (current !== generation) return;
+        add(buffer, file.name);
+        added++;
+      } catch (error) {
+        if (current !== generation) return;
+        onError(`${file.name}：${error.message}`);
+      }
+    }
+    onFinish(added);
+  };
+}

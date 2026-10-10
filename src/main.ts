@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { inferJaw } from './stl.mjs';
 import { parseModelGeometry } from './model-loader.mjs';
+import { clearModels, createModelImporter } from './model-import.mjs';
 import './style.css';
 
 const svg = (body: string) => `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -107,7 +108,22 @@ function addBuffer(buffer: ArrayBuffer, name: string) {
   const material=new THREE.MeshStandardMaterial({color:0xc7a775,roughness:0.65,metalness:0,side:THREE.DoubleSide,opacity,transparent:opacity<1,depthWrite:opacity===1,flatShading:surface==='flat',wireframe:surface==='wire'});
   const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles});
 }
-async function importFiles(files: File[]) { if(!files.length)return;selectStep(steps[0]);loading++;applyVisibility();let added=0;for(const file of files) { if(!/\.(stl|obj)$/i.test(file.name)){toast(`${file.name}：仅支持 STL / OBJ 文件`);continue;}if(file.size>150*1024*1024){toast(`${file.name}：文件超过 150 MB`);continue;}try{addBuffer(await file.arrayBuffer(),file.name);added++;}catch(e){toast(`${file.name}：${(e as Error).message}`);} } loading--;if(added)$<HTMLSelectElement>('filter').value='all';renderList();fit(); }
+const importFiles = createModelImporter({
+  clear: () => clearModels(group, models),
+  add: addBuffer,
+  onStart: () => {
+    loading=1;pendingFit=false;
+    $('dimensions').textContent='模型坐标单位';
+    $('toast').hidden=true;clearTimeout(toastTimer);
+    selectStep(steps[0]);renderList();
+  },
+  onFinish: added => {
+    loading=0;
+    if(added)$<HTMLSelectElement>('filter').value='all';
+    renderList();fit();
+  },
+  onError: toast,
+});
 const input=$<HTMLInputElement>('file-input');input.onchange=()=>{void importFiles(Array.from(input.files||[]));input.value='';};
 for(const id of ['import','add-model','empty-import']) $(id).onclick=()=>input.click();
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view!));
