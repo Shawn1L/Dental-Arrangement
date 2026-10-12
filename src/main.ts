@@ -5,7 +5,7 @@ import { inferJaw } from './stl.mjs';
 import { parseModelGeometry } from './model-loader.mjs';
 import { clearModels, createModelImporter } from './model-import.mjs';
 import { createReferenceGrid } from './reference-grid';
-import { labelGeometry, type Tooth } from './segmentation.mjs';
+import { labelGeometry, createToothAnnotations, type ToothAnnotation } from './segmentation.mjs';
 import './style.css';
 
 const svg = (body: string) => `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -97,7 +97,7 @@ controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePann
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
-type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; teeth?: Tooth[] };
+type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; teeth?: ToothAnnotation[] };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
@@ -221,7 +221,7 @@ async function runSegmentation(){
       if(!response.ok){const error=await response.json().catch(()=>null);throw new Error(error?.detail || `分牙服务不可用（${response.status}），请启动本地推理服务`);}
       const result=await response.json();
       if(generation!==segmentationGeneration)return;
-      model.teeth=labelGeometry(model.mesh.geometry,result);
+      model.teeth=createToothAnnotations(labelGeometry(model.mesh.geometry,result));
       model.mesh.material.vertexColors=segmentationActive;model.mesh.material.color.set(segmentationActive?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;
     }
     segmentationMessage='';
@@ -238,29 +238,22 @@ function updateToothLabels(){
   if(hidden)return;
   const width=viewport.clientWidth,height=viewport.clientHeight;
   overlay.setAttribute('viewBox',`0 0 ${width} ${height}`);
-  const bounds=visibleBounds();const center=bounds.getCenter(new THREE.Vector3()).project(camera);
-  const cx=(center.x+1)*width/2,cy=(1-center.y)*height/2;
-  const entries:{id:number;x:number;y:number;lx:number;ly:number}[]=[];
+  const entries:{id:number;x:number;y:number;lx:number;ly:number;r:number}[]=[];
+  const cameraRight=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0);
   for(const model of models){
     if(!model.mesh.visible)continue;
     for(const tooth of model.teeth||[]){
       const projected=new THREE.Vector3(...tooth.center).applyMatrix4(model.mesh.matrixWorld).project(camera);
-      if(projected.z < -1 || projected.z > 1)continue;
+      const labelWorld=new THREE.Vector3(...tooth.labelCenter).applyMatrix4(model.mesh.matrixWorld);
+      const label=labelWorld.clone().project(camera);
+      if(projected.z < -1 || projected.z > 1 || label.z < -1 || label.z > 1)continue;
       const x=(projected.x+1)*width/2,y=(1-projected.y)*height/2;
-      if(x<0||x>width||y<0||y>height)continue;
-      const dx=x-cx,dy=y-cy,length=Math.hypot(dx,dy)||1;
-      entries.push({id:tooth.id,x,y,lx:Math.max(28,Math.min(width-28,x+dx/length*76)),ly:Math.max(120,Math.min(height-32,y+dy/length*76))});
+      const edge=labelWorld.clone().addScaledVector(cameraRight,tooth.labelRadius*model.mesh.getWorldScale(new THREE.Vector3()).x).project(camera);
+      const r=Math.abs(edge.x-label.x)*width/2;
+      entries.push({id:tooth.id,x,y,lx:(label.x+1)*width/2,ly:(1-label.y)*height/2,r});
     }
   }
-  // Deterministic screen-space relaxation keeps neighboring labels separated
-  // while the leader line continues to follow its actual tooth in 3D.
-  for(let pass=0;pass<16;pass++)for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
-    const a=entries[i],b=entries[j],dx=b.lx-a.lx,dy=b.ly-a.ly,d=Math.hypot(dx,dy);
-    if(d>=49)continue;const nx=d?dx/d:0,ny=d?dy/d:1,shift=(49-d)/2;
-    a.lx=Math.max(26,Math.min(width-26,a.lx-nx*shift));a.ly=Math.max(120,Math.min(height-26,a.ly-ny*shift));
-    b.lx=Math.max(26,Math.min(width-26,b.lx+nx*shift));b.ly=Math.max(120,Math.min(height-26,b.ly+ny*shift));
-  }
-  overlay.innerHTML=entries.map(t=>`<g><line x1="${t.x}" y1="${t.y}" x2="${t.lx}" y2="${t.ly}"/><circle cx="${t.lx}" cy="${t.ly}" r="22"/><text x="${t.lx}" y="${t.ly}" dy=".35em">${t.id}</text></g>`).join('');
+  overlay.innerHTML=entries.map(t=>`<g data-tooth="${t.id}"><line x1="${t.x}" y1="${t.y}" x2="${t.lx}" y2="${t.ly}"/><circle cx="${t.x}" cy="${t.y}" r="${t.r*.14}"/><circle cx="${t.lx}" cy="${t.ly}" r="${t.r}"/><text x="${t.lx}" y="${t.ly}" style="font-size:${t.r*.55}px" dy=".35em">${t.id}</text></g>`).join('');
 }
 function renderFrame(){renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);updateToothLabels();}
 renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();

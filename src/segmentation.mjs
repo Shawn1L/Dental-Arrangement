@@ -10,6 +10,24 @@ export function toothColor(id) {
   return (quadrant === 1 || quadrant === 3 ? light : dark)[id % 10 - 1];
 }
 
+// Anchors live in the model's XY dental arch plane, independent of the camera,
+// visible jaw filter, and other projected bubbles. Overlap is intentional.
+export function createToothAnnotations(teeth) {
+  if (!teeth.length) return [];
+  const center = [0, 0];
+  for (const tooth of teeth) { center[0] += tooth.center[0]; center[1] += tooth.center[1]; }
+  center[0] /= teeth.length; center[1] /= teeth.length;
+  const width = Math.max(...teeth.map(t => t.center[0])) - Math.min(...teeth.map(t => t.center[0]));
+  const depth = Math.max(...teeth.map(t => t.center[1])) - Math.min(...teeth.map(t => t.center[1]));
+  const span = Math.max(width, depth, 1);
+  return teeth.map(tooth => {
+    const dx = tooth.center[0] - center[0], dy = tooth.center[1] - center[1];
+    const length = Math.hypot(dx, dy);
+    const direction = length > 1e-8 ? [dx / length, dy / length] : [0, -1];
+    return { ...tooth, labelCenter: [tooth.center[0] + direction[0] * span * .16, tooth.center[1] + direction[1] * span * .16, tooth.center[2]], labelRadius: span * .038 };
+  });
+}
+
 // OBJLoader expands faces in source order. Keep the original vertex indices so
 // per-vertex inference labels survive triangulation and the viewer's welding.
 export function objVertexMap(buffer) {
