@@ -21,3 +21,31 @@
 @media(max-width:760px){.workflow-brand{display:none}.steps{padding:0 8px}.step{padding:0 12px}.step-arrow{font-size:20px;padding:0 2px}.step-number{width:17px;height:17px;font-size:9px}.feature-bar{padding:0 8px}.feature-bar button{min-width:65px}}
 @media(max-width:1100px){.top-actions{top:94px}.top-actions .primary span{display:inline}.top-actions .primary{padding:10px 12px}#panel{top:147px;max-height:calc(100% - 225px)}}
 .view-info{display:flex;gap:18px;align-items:center}#projection-label{color:#8995a2}@media(max-width:760px){.view-info{flex-direction:column;gap:4px;align-items:flex-end}}
+
+/* Segmentation shares the uploaded scene and follows the supplied reference. */
+.segmentation-stage .feature-bar{background:#3d3d3d;padding:0;height:68px;gap:0}
+.segmentation-stage{--feature-height:68px}
+.segmentation-stage .feature-bar button{min-width:72px;gap:5px;color:#d2d2d2;border:0;font-size:14px}
+.segmentation-stage .feature-bar button.active{background:#2c2c2c;color:#7fbdff}
+.segmentation-stage .feature-bar svg{width:25px;height:25px}
+.segmentation-stage .top-actions,.segmentation-stage .bottom-tools,.segmentation-stage footer{display:none}
+.segmentation-stage .views{top:28px;gap:8px}
+.segmentation-stage .view{width:52px;border-radius:0;padding:2px 4px;gap:4px}
+.segmentation-stage .view svg{width:36px;height:36px;padding:5px;border-radius:7px}
+.segmentation-stage .view.active{background:none;color:#7abafa}
+.segmentation-stage .view.active svg{background:#e6e6e6;stroke-width:3}
+.segmentation-stage .view span,.segmentation-stage .view.active span{color:#666;font-size:12px}
+.segmentation-stage .views>.divider{display:none}
+.segmentation-stage .jaw-select svg{background:#e6e6e6;border-radius:5px;width:40px;height:36px;padding:5px;stroke-width:4}
+#segmentation-hints{position:absolute;left:22px;top:28px;color:#b5b5b5;font-size:13px;pointer-events:none}
+#segmentation-hints ul{margin:0;padding-left:17px;line-height:1.65}
+#segmentation-actions{position:absolute;right:28px;top:36px}
+#adjust-segmentation{background:#49a0ff;box-shadow:none;padding:8px 20px;font-size:14px;cursor:default}
+#tooth-labels{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
+#tooth-labels line{stroke:#70b5ff;stroke-width:1.5}
+#tooth-labels circle{fill:#42a1ff}
+#tooth-labels text{fill:white;font-size:12px;text-anchor:middle;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+#segmentation-state{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);max-width:80%;color:#76818d;background:#ffffffdf;border:1px solid #e2e5e8;border-radius:8px;padding:12px 18px;line-height:1.6;text-align:center}
+#segmentation-state button{margin-left:14px;color:#3896f5;text-decoration:underline}
+@media(max-width:1100px){#segmentation-hints{top:95px;font-size:11px;left:16px}#segmentation-actions{top:95px;right:18px}}
+@media(max-width:760px){.segmentation-stage .views{top:14px;gap:2px}.segmentation-stage .view{width:37px}.segmentation-stage .view svg{width:29px;height:29px}.segmentation-stage .view span{font-size:10px}#segmentation-hints{max-width:calc(100% - 130px);font-size:10px}#adjust-segmentation{padding:8px 12px;font-size:12px}}

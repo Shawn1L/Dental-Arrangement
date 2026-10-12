@@ -5,6 +5,7 @@ import { inferJaw } from './stl.mjs';
 import { parseModelGeometry } from './model-loader.mjs';
 import { clearModels, createModelImporter } from './model-import.mjs';
 import { createReferenceGrid } from './reference-grid';
+import { labelGeometry, type Tooth } from './segmentation.mjs';
 import './style.css';
 
 const svg = (body: string) => `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -17,6 +18,10 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <nav class="feature-bar" aria-label="预处理功能"><button data-feature="网格" aria-pressed="false" title="开启网格并切换正交投影">${svg('<rect x="6" y="6" width="20" height="20" rx="1"/><path d="M6 13h20M6 20h20M13 6v20M20 6v20"/>')}<span>网格</span></button><button data-feature="咬合碰撞">${svg(bite)}<span>咬合碰撞</span></button><button data-feature="模型调整">${svg('<path d="M6 9h20M6 16h20M6 23h20"/><circle cx="12" cy="9" r="3" fill="#3d3d3d"/><circle cx="21" cy="16" r="3" fill="#3d3d3d"/><circle cx="12" cy="23" r="3" fill="#3d3d3d"/>')}<span>模型调整</span></button></nav>
   <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="牙模三维查看器"></main>
+  <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>查看时，请用鼠标左右键旋转模型，用中键平移模型</li></ul></div>
+  <svg id="tooth-labels" aria-label="牙号标注" hidden></svg>
+  <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary" aria-disabled="true" title="调整分牙功能暂未开发">调整分牙</button></div>
+  <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
   <div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择牙模文件">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择牙模文件</span></button></div>
   <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择牙模文件</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 文件在本地处理</p></aside>
@@ -45,13 +50,33 @@ let gridEnabled = false;
 const referenceGrid = createReferenceGrid();
 camera.position.set(0,0,200);
 const controls = new OrbitControls(camera, renderer.domElement);
+let segmentationActive = false;
+let showToothNumbers = false;
+const featureBar = document.querySelector<HTMLElement>('.feature-bar')!;
+const preprocessingFeatures = featureBar.innerHTML;
+const toothIcon = '<path d="M9 5c3-2 4 1 7 1s4-3 7-1c5 4 1 10 0 14s-2 9-4 8-1-8-3-8-1 8-3 8-3-6-4-9S5 8 9 5z"/><circle cx="25" cy="23" r="5"/><path d="m23 23 1 1 3-3"/>';
 function selectStep(name: string, feature?: string) {
   const preprocessing = name === steps[0] && !feature;
-  $('workspace').hidden = !preprocessing;
-  $('development').hidden = preprocessing;
+  segmentationActive = name === steps[1];
+  const viewer = preprocessing || segmentationActive;
+  document.body.classList.toggle('segmentation-stage', segmentationActive);
+  featureBar.setAttribute('aria-label',segmentationActive?'分牙功能':'预处理功能');
+  featureBar.innerHTML = segmentationActive ? `<button id="tooth-number-toggle" aria-pressed="${showToothNumbers}" class="${showToothNumbers?'active':''}">${svg(toothIcon)}<span>牙号</span></button>` : preprocessingFeatures;
+  if (segmentationActive) $('tooth-number-toggle').onclick=()=>{showToothNumbers=!showToothNumbers;$('tooth-number-toggle').classList.toggle('active',showToothNumbers);$('tooth-number-toggle').setAttribute('aria-pressed',String(showToothNumbers));};
+  else bindFeatures();
+  $('workspace').hidden = !viewer;
+  $('development').hidden = viewer;
+  $('workspace').setAttribute('aria-label',segmentationActive ? '分牙' : '模型预处理');
+  $('segmentation-hints').hidden = !segmentationActive;
+  $('segmentation-actions').hidden = !segmentationActive;
+  if(segmentationActive)$('panel').hidden=true;
+  for(const model of models){model.mesh.material.vertexColors=segmentationActive && !!model.teeth;model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;}
+  updateSegmentationState();
+  if(segmentationActive)void runSegmentation();
   $('development-title').textContent = feature || name;
-  controls.enabled = preprocessing;
-  if(preprocessing){resize();if(pendingFit)fit();}
+  controls.enabled = viewer;
+  controls.mouseButtons = segmentationActive ? { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE } : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  if(viewer){resize();if(pendingFit)fit();}
   document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach(button=>{
     const selected=button.dataset.step===name;
     button.classList.toggle('active',selected);button.setAttribute('aria-pressed',String(selected));
@@ -62,19 +87,21 @@ function selectStep(name: string, feature?: string) {
   });
 }
 document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach(button=>button.onclick=()=>selectStep(button.dataset.step!));
-document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button=>button.onclick=()=>{
+function bindFeatures(){document.querySelectorAll<HTMLButtonElement>('[data-feature]').forEach(button=>button.onclick=()=>{
   if(button.dataset.feature==='网格'){selectStep(steps[0]);toggleGrid();}
   else selectStep(steps[0],button.dataset.feature);
-});
+});}bindFeatures();
 $('back-preprocessing').onclick=()=>selectStep(steps[0]);
 controls.enableDamping = true; controls.dampingFactor = 0.09; controls.minZoom = 0.08; controls.maxZoom = 25;
 controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePanning = true;
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
-type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number };
+type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; teeth?: Tooth[] };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
+let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
+function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.mesh.geometry.deleteAttribute('color');}
 function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; if(!w || !h)return;renderer.setSize(w,h); perspectiveCamera.aspect=w/h; perspectiveCamera.updateProjectionMatrix(); orthographicCamera.left=-radius*w/h; orthographicCamera.right=radius*w/h; orthographicCamera.top=radius; orthographicCamera.bottom=-radius; orthographicCamera.updateProjectionMatrix(); }
 function toggleGrid() {
   // Flush damping before changing cameras so toggling cannot add a rotation.
@@ -130,8 +157,8 @@ function renderList() {
     const row=document.createElement('div'); row.className='model-row';
     const check=document.createElement('input');check.type='checkbox';check.checked=model.enabled;check.setAttribute('aria-label',`显示 ${model.name}`);check.onchange=()=>{model.enabled=check.checked;applyVisibility();fit();};
     const info=document.createElement('div');info.className='model-info';const name=document.createElement('strong');name.textContent=model.name;name.title=model.name;const detail=document.createElement('small');detail.textContent=`${model.triangles.toLocaleString()} 个三角面`;info.append(name,detail);
-    const jaw=document.createElement('select');jaw.setAttribute('aria-label',`${model.name} 所属颌面`);for(const [value,label] of [['upper','上颌'],['lower','下颌'],['other','其他']])jaw.add(new Option(label,value));jaw.value=model.jaw;jaw.onchange=()=>{model.jaw=jaw.value as Model['jaw'];applyVisibility();fit();};
-    const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title=`移除 ${model.name}`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{group.remove(model.mesh);model.mesh.geometry.dispose();model.mesh.material.dispose();models.splice(models.indexOf(model),1);renderList();fit();};
+    const jaw=document.createElement('select');jaw.setAttribute('aria-label',`${model.name} 所属颌面`);for(const [value,label] of [['upper','上颌'],['lower','下颌'],['other','其他']])jaw.add(new Option(label,value));jaw.value=model.jaw;jaw.onchange=()=>{invalidateSegmentation(model);model.jaw=jaw.value as Model['jaw'];applyVisibility();fit();};
+    const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title=`移除 ${model.name}`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{invalidateSegmentation(model);group.remove(model.mesh);model.mesh.geometry.dispose();model.mesh.material.dispose();models.splice(models.indexOf(model),1);renderList();fit();};
     row.append(check,info,jaw,remove);$('models').append(row);
   } applyVisibility();
 }
@@ -139,6 +166,7 @@ function addBuffer(buffer: ArrayBuffer, name: string) {
   let geometry=parseModelGeometry(buffer,name); const position=geometry.getAttribute('position');
   const triangles=position.count/3;
   geometry.deleteAttribute('normal');geometry.deleteAttribute('color');const original=geometry;geometry=mergeVertices(geometry,0.00001);original.dispose();geometry.computeVertexNormals();geometry.computeBoundingBox();
+  const welded=geometry;geometry=welded.toNonIndexed();welded.dispose();
   const opacity=Number($<HTMLInputElement>('opacity').value)/100;const surface=$<HTMLSelectElement>('surface').value;
   const material=new THREE.MeshStandardMaterial({color:0xc7a775,roughness:0.65,metalness:0,side:THREE.DoubleSide,opacity,transparent:opacity<1,depthWrite:opacity===1,flatShading:surface==='flat',wireframe:surface==='wire'});
   const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles});
@@ -147,6 +175,7 @@ const importFiles = createModelImporter({
   clear: () => clearModels(group, models),
   add: addBuffer,
   onStart: () => {
+    segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';showToothNumbers=false;
     loading=1;pendingFit=false;
     $('dimensions').textContent='模型坐标单位';
     $('toast').hidden=true;clearTimeout(toastTimer);
@@ -172,5 +201,66 @@ $('opacity').oninput=()=>{const value=Number($<HTMLInputElement>('opacity').valu
 $('screenshot').onclick=()=>{renderFrame();renderer.domElement.toBlob(blob=>{if(!blob){toast('截图失败');return;}const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`STL-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});};
 let dragDepth=0;window.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();dragDepth++;$('drop-overlay').hidden=false;}});window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('drop-overlay').hidden=true;});window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('drop-overlay').hidden=true;void importFiles(Array.from(e.dataTransfer?.files||[]));});
 window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || $('workspace').hidden)return;if(e.key.toLowerCase()==='f')fit();});
-function renderFrame(){renderer.render(scene,camera);if(gridEnabled)referenceGrid.render(renderer,orthographicCamera);}
+function updateSegmentationState(){
+  const ready=models.filter(model=>model.teeth).length;
+  $('segmentation-state').hidden=!segmentationActive || ready===models.length && !!models.length && !segmentationMessage;
+  $('segmentation-state').textContent=segmentationMessage || (!models.length?'请先在模型预处理阶段上传牙模':ready?'部分模型尚无分牙结果':'当前模型尚无分牙结果');
+  if(models.length&&!segmentationRunning&&ready<models.length){const retry=document.createElement('button');retry.textContent='重新分牙';retry.onclick=()=>void runSegmentation();$('segmentation-state').append(retry);}
+}
+async function runSegmentation(){
+  if(segmentationRunning||!models.length||models.every(model=>model.teeth))return;
+  const generation=segmentationGeneration;segmentationRunning=true;segmentationMessage='正在准备自动分牙…';updateSegmentationState();
+  try{
+    for(const model of [...models]){
+      if(model.teeth)continue;
+      if(model.jaw==='other')throw new Error('请返回模型预处理，在模型面板指定所属上颌或下颌后再分牙');
+      segmentationMessage=`正在分牙 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
+      segmentationAbort=new AbortController();
+      const positions=model.mesh.geometry.getAttribute('position').array as Float32Array;
+      const response=await fetch(`/api/segmentation?jaw=${model.jaw}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Blob([positions.slice().buffer]),signal:segmentationAbort.signal});
+      if(!response.ok){const error=await response.json().catch(()=>null);throw new Error(error?.detail || `分牙服务不可用（${response.status}），请启动本地推理服务`);}
+      const result=await response.json();
+      if(generation!==segmentationGeneration)return;
+      model.teeth=labelGeometry(model.mesh.geometry,result);
+      model.mesh.material.vertexColors=segmentationActive;model.mesh.material.color.set(segmentationActive?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;
+    }
+    segmentationMessage='';
+  }catch(error){
+    if(generation!==segmentationGeneration)return;
+    segmentationMessage=error instanceof Error?error.message:String(error);
+    if(segmentationMessage==='Failed to fetch')segmentationMessage='无法连接分牙服务，请启动本地推理服务后重试';
+  }finally{
+    if(generation===segmentationGeneration){segmentationRunning=false;updateSegmentationState();}
+  }
+}
+function updateToothLabels(){
+  const overlay=$('tooth-labels');const hidden=!segmentationActive || !showToothNumbers;overlay.toggleAttribute('hidden',hidden);
+  if(hidden)return;
+  const width=viewport.clientWidth,height=viewport.clientHeight;
+  overlay.setAttribute('viewBox',`0 0 ${width} ${height}`);
+  const bounds=visibleBounds();const center=bounds.getCenter(new THREE.Vector3()).project(camera);
+  const cx=(center.x+1)*width/2,cy=(1-center.y)*height/2;
+  const entries:{id:number;x:number;y:number;lx:number;ly:number}[]=[];
+  for(const model of models){
+    if(!model.mesh.visible)continue;
+    for(const tooth of model.teeth||[]){
+      const projected=new THREE.Vector3(...tooth.center).applyMatrix4(model.mesh.matrixWorld).project(camera);
+      if(projected.z < -1 || projected.z > 1)continue;
+      const x=(projected.x+1)*width/2,y=(1-projected.y)*height/2;
+      if(x<0||x>width||y<0||y>height)continue;
+      const dx=x-cx,dy=y-cy,length=Math.hypot(dx,dy)||1;
+      entries.push({id:tooth.id,x,y,lx:Math.max(28,Math.min(width-28,x+dx/length*76)),ly:Math.max(120,Math.min(height-32,y+dy/length*76))});
+    }
+  }
+  // Deterministic screen-space relaxation keeps neighboring labels separated
+  // while the leader line continues to follow its actual tooth in 3D.
+  for(let pass=0;pass<16;pass++)for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++){
+    const a=entries[i],b=entries[j],dx=b.lx-a.lx,dy=b.ly-a.ly,d=Math.hypot(dx,dy);
+    if(d>=49)continue;const nx=d?dx/d:0,ny=d?dy/d:1,shift=(49-d)/2;
+    a.lx=Math.max(26,Math.min(width-26,a.lx-nx*shift));a.ly=Math.max(120,Math.min(height-26,a.ly-ny*shift));
+    b.lx=Math.max(26,Math.min(width-26,b.lx+nx*shift));b.ly=Math.max(120,Math.min(height-26,b.ly+ny*shift));
+  }
+  overlay.innerHTML=entries.map(t=>`<g><line x1="${t.x}" y1="${t.y}" x2="${t.lx}" y2="${t.ly}"/><circle cx="${t.lx}" cy="${t.ly}" r="22"/><text x="${t.lx}" y="${t.ly}" dy=".35em">${t.id}</text></g>`).join('');
+}
+function renderFrame(){renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);updateToothLabels();}
 renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();
