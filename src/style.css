@@ -42,10 +42,6 @@
 #segmentation-hints ul{margin:0;padding-left:17px;line-height:1.65}
 #segmentation-actions{position:absolute;right:28px;top:36px}
 #adjust-segmentation{background:#49a0ff;box-shadow:none;padding:8px 20px;font-size:14px;cursor:default}
-#tooth-labels{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:hidden}
-#tooth-labels line{stroke:#70b5ff;stroke-width:1.5}
-#tooth-labels circle{fill:#42a1ff}
-#tooth-labels text{fill:white;font-size:12px;text-anchor:middle;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
 #segmentation-state{position:absolute;bottom:28px;left:50%;transform:translateX(-50%);max-width:80%;color:#76818d;background:#ffffffdf;border:1px solid #e2e5e8;border-radius:8px;padding:12px 18px;line-height:1.6;text-align:center}
 #segmentation-state button{margin-left:14px;color:#3896f5;text-decoration:underline}
 @media(max-width:1100px){#segmentation-hints{top:95px;font-size:11px;left:16px}#segmentation-actions{top:95px;right:18px}}

@@ -6,6 +6,7 @@ import { parseModelGeometry } from './model-loader.mjs';
 import { clearModels, createModelImporter } from './model-import.mjs';
 import { discoverCases, type LocalCase } from './folder-import.mjs';
 import { createReferenceGrid } from './reference-grid';
+import { createToothLabels } from './tooth-labels';
 import { labelGeometry, objVertexMap, createToothAnnotations, type ToothAnnotation } from './segmentation.mjs';
 import './style.css';
 
@@ -20,7 +21,6 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="牙模三维查看器"></main>
   <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>查看时，请用鼠标左右键旋转模型，用中键平移模型</li></ul></div>
-  <svg id="tooth-labels" aria-label="牙号标注" hidden></svg>
   <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary" aria-disabled="true" title="调整分牙功能暂未开发">调整分牙</button></div>
   <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
@@ -263,27 +263,22 @@ async function runSegmentation(){
     if(generation===segmentationGeneration){segmentationRunning=false;updateSegmentationState();}
   }
 }
+const toothLabels = new Map<Model,{teeth:ToothAnnotation[];visual:ReturnType<typeof createToothLabels>}>();
 function updateToothLabels(){
-  const overlay=$('tooth-labels');const hidden=!segmentationActive || !showToothNumbers;overlay.toggleAttribute('hidden',hidden);
-  if(hidden)return;
-  const width=viewport.clientWidth,height=viewport.clientHeight;
-  overlay.setAttribute('viewBox',`0 0 ${width} ${height}`);
-  const entries:{id:number;x:number;y:number;lx:number;ly:number;r:number}[]=[];
-  const cameraRight=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,0);
-  for(const model of models){
-    if(!model.mesh.visible)continue;
-    for(const tooth of model.teeth||[]){
-      const projected=new THREE.Vector3(...tooth.center).applyMatrix4(model.mesh.matrixWorld).project(camera);
-      const labelWorld=new THREE.Vector3(...tooth.labelCenter).applyMatrix4(model.mesh.matrixWorld);
-      const label=labelWorld.clone().project(camera);
-      if(projected.z < -1 || projected.z > 1 || label.z < -1 || label.z > 1)continue;
-      const x=(projected.x+1)*width/2,y=(1-projected.y)*height/2;
-      const edge=labelWorld.clone().addScaledVector(cameraRight,tooth.labelRadius*model.mesh.getWorldScale(new THREE.Vector3()).x).project(camera);
-      const r=Math.abs(edge.x-label.x)*width/2;
-      entries.push({id:tooth.id,x,y,lx:(label.x+1)*width/2,ly:(1-label.y)*height/2,r});
-    }
+  for(const [model,entry] of toothLabels){
+    if(!models.includes(model)||model.teeth!==entry.teeth){entry.visual.dispose();toothLabels.delete(model);}
   }
-  overlay.innerHTML=entries.map(t=>`<g data-tooth="${t.id}"><line x1="${t.x}" y1="${t.y}" x2="${t.lx}" y2="${t.ly}"/><circle cx="${t.x}" cy="${t.y}" r="${t.r*.14}"/><circle cx="${t.lx}" cy="${t.ly}" r="${t.r}"/><text x="${t.lx}" y="${t.ly}" style="font-size:${t.r*.55}px" dy=".35em">${t.id}</text></g>`).join('');
+  for(const model of models){
+    const visible=segmentationActive&&showToothNumbers&&model.mesh.visible&&!!model.teeth;
+    let entry=toothLabels.get(model);
+    if(visible&&!entry){
+      entry={teeth:model.teeth!,visual:createToothLabels(model.teeth!)};
+      toothLabels.set(model,entry);scene.add(entry.visual.group);
+    }
+    if(!entry)continue;
+    entry.visual.group.visible=visible;
+    if(visible){model.mesh.updateWorldMatrix(true,false);entry.visual.group.matrix.copy(model.mesh.matrixWorld);}
+  }
 }
-function renderFrame(){renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);updateToothLabels();}
+function renderFrame(){updateToothLabels();renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);}
 renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();updateSegmentationState();
