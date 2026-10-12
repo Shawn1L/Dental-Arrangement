@@ -24,8 +24,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
   <div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择牙模文件">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择牙模文件</span></button></div>
-  <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择牙模文件</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 文件在本地处理</p></aside>
-  <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>上传你的牙模</h1><p>选择或拖入 STL / OBJ 文件，开始模型预处理可视化<br/>支持同时上传上下颌模型，文件仅在本地读取</p><button id="empty-import" class="primary">选择牙模文件</button><small>支持 STL / OBJ · 单文件最大 150 MB</small></section>
+  <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择牙模文件</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 上传完成后自动分牙</p></aside>
+  <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>上传你的牙模</h1><p>选择或拖入 STL / OBJ 文件，开始模型预处理可视化<br/>支持同时上传上下颌模型，上传后自动开始分牙</p><button id="empty-import" class="primary">选择牙模文件</button><small>支持 STL / OBJ · 单文件最大 150 MB</small></section>
   <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待选择牙模文件</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>滚轮缩放</div><span class="view-info"><span id="projection-label">透视投影</span><span id="dimensions">模型坐标单位</span></span></footer>
   <div class="bottom-tools"><button id="fit" class="icon-button" title="适应窗口（F）" aria-label="适应窗口">${svg('<path d="M12 6H6v6m14-6h6v6M6 20v6h6m14-6v6h-6"/>')}</button><button id="reset" class="icon-button" title="恢复初始视图" aria-label="恢复初始视图">${svg('<path d="M7 13a10 10 0 1 1 1 12M7 5v8h8"/>')}</button><span class="divider"></span><button id="screenshot" class="icon-button" title="导出 PNG 截图" aria-label="导出 PNG 截图">${svg('<path d="M4 10h7l2-4h6l2 4h7v16H4z"/><circle cx="16" cy="18" r="5"/>')}</button></div>
   </section>
@@ -56,6 +56,7 @@ const featureBar = document.querySelector<HTMLElement>('.feature-bar')!;
 const preprocessingFeatures = featureBar.innerHTML;
 const toothIcon = '<path d="M9 5c3-2 4 1 7 1s4-3 7-1c5 4 1 10 0 14s-2 9-4 8-1-8-3-8-1 8-3 8-3-6-4-9S5 8 9 5z"/><circle cx="25" cy="23" r="5"/><path d="m23 23 1 1 3-3"/>';
 function selectStep(name: string, feature?: string) {
+  if(name===steps[1]&&!segmentationReady())return;
   const preprocessing = name === steps[0] && !feature;
   segmentationActive = name === steps[1];
   const viewer = preprocessing || segmentationActive;
@@ -72,7 +73,6 @@ function selectStep(name: string, feature?: string) {
   if(segmentationActive)$('panel').hidden=true;
   for(const model of models){model.mesh.material.vertexColors=segmentationActive && !!model.teeth;model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;}
   updateSegmentationState();
-  if(segmentationActive)void runSegmentation();
   $('development-title').textContent = feature || name;
   controls.enabled = viewer;
   controls.mouseButtons = segmentationActive ? { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE } : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
@@ -101,7 +101,7 @@ type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: 
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
-function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.mesh.geometry.deleteAttribute('color');}
+function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.mesh.geometry.deleteAttribute('color');updateSegmentationState();}
 function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; if(!w || !h)return;renderer.setSize(w,h); perspectiveCamera.aspect=w/h; perspectiveCamera.updateProjectionMatrix(); orthographicCamera.left=-radius*w/h; orthographicCamera.right=radius*w/h; orthographicCamera.top=radius; orthographicCamera.bottom=-radius; orthographicCamera.updateProjectionMatrix(); }
 function toggleGrid() {
   // Flush damping before changing cameras so toggling cannot add a rotation.
@@ -157,10 +157,10 @@ function renderList() {
     const row=document.createElement('div'); row.className='model-row';
     const check=document.createElement('input');check.type='checkbox';check.checked=model.enabled;check.setAttribute('aria-label',`显示 ${model.name}`);check.onchange=()=>{model.enabled=check.checked;applyVisibility();fit();};
     const info=document.createElement('div');info.className='model-info';const name=document.createElement('strong');name.textContent=model.name;name.title=model.name;const detail=document.createElement('small');detail.textContent=`${model.triangles.toLocaleString()} 个三角面`;info.append(name,detail);
-    const jaw=document.createElement('select');jaw.setAttribute('aria-label',`${model.name} 所属颌面`);for(const [value,label] of [['upper','上颌'],['lower','下颌'],['other','其他']])jaw.add(new Option(label,value));jaw.value=model.jaw;jaw.onchange=()=>{invalidateSegmentation(model);model.jaw=jaw.value as Model['jaw'];applyVisibility();fit();};
+    const jaw=document.createElement('select');jaw.setAttribute('aria-label',`${model.name} 所属颌面`);for(const [value,label] of [['upper','上颌'],['lower','下颌'],['other','其他']])jaw.add(new Option(label,value));jaw.value=model.jaw;jaw.onchange=()=>{invalidateSegmentation(model);model.jaw=jaw.value as Model['jaw'];applyVisibility();fit();void runSegmentation();};
     const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title=`移除 ${model.name}`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{invalidateSegmentation(model);group.remove(model.mesh);model.mesh.geometry.dispose();model.mesh.material.dispose();models.splice(models.indexOf(model),1);renderList();fit();};
     row.append(check,info,jaw,remove);$('models').append(row);
-  } applyVisibility();
+  } applyVisibility();updateSegmentationState();
 }
 function addBuffer(buffer: ArrayBuffer, name: string) {
   let geometry=parseModelGeometry(buffer,name); const position=geometry.getAttribute('position');
@@ -185,6 +185,7 @@ const importFiles = createModelImporter({
     loading=0;
     if(added)$<HTMLSelectElement>('filter').value='all';
     renderList();fit();
+    if(added)void runSegmentation();
   },
   onError: toast,
 });
@@ -201,19 +202,24 @@ $('opacity').oninput=()=>{const value=Number($<HTMLInputElement>('opacity').valu
 $('screenshot').onclick=()=>{renderFrame();renderer.domElement.toBlob(blob=>{if(!blob){toast('截图失败');return;}const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`STL-${new Date().toISOString().replace(/[:.]/g,'-')}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});};
 let dragDepth=0;window.addEventListener('dragenter',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();dragDepth++;$('drop-overlay').hidden=false;}});window.addEventListener('dragover',e=>e.preventDefault());window.addEventListener('dragleave',()=>{dragDepth=Math.max(0,dragDepth-1);if(!dragDepth)$('drop-overlay').hidden=true;});window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;$('drop-overlay').hidden=true;void importFiles(Array.from(e.dataTransfer?.files||[]));});
 window.addEventListener('keydown',e=>{if(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || $('workspace').hidden)return;if(e.key.toLowerCase()==='f')fit();});
+function segmentationReady(){return !loading&&!segmentationRunning&&!!models.length&&models.every(model=>!!model.teeth);}
 function updateSegmentationState(){
-  const ready=models.filter(model=>model.teeth).length;
-  $('segmentation-state').hidden=!segmentationActive || ready===models.length && !!models.length && !segmentationMessage;
-  $('segmentation-state').textContent=segmentationMessage || (!models.length?'请先在模型预处理阶段上传牙模':ready?'部分模型尚无分牙结果':'当前模型尚无分牙结果');
-  if(models.length&&!segmentationRunning&&ready<models.length){const retry=document.createElement('button');retry.textContent='重新分牙';retry.onclick=()=>void runSegmentation();$('segmentation-state').append(retry);}
+  const ready=segmentationReady(),busy=!!loading||segmentationRunning;
+  const step=document.querySelector<HTMLButtonElement>('[data-step="分牙"]')!;
+  step.disabled=!ready;step.classList.toggle('busy',busy);step.classList.toggle('ready',ready);step.setAttribute('aria-busy',String(busy));
+  step.title=busy?'正在自动分牙，完成后可进入':ready?'分牙完成，点击查看':models.length?'分牙尚未完成':'请先上传模型';
+  $('segmentation-state').hidden=segmentationActive||!segmentationMessage||busy;
+  $('segmentation-state').textContent=segmentationMessage;
+  if(models.length&&!busy&&!ready&&models.every(model=>model.jaw!=='other')){const retry=document.createElement('button');retry.textContent='重新分牙';retry.onclick=()=>void runSegmentation();$('segmentation-state').append(retry);}
 }
 async function runSegmentation(){
-  if(segmentationRunning||!models.length||models.every(model=>model.teeth))return;
+  if(loading||segmentationRunning||!models.length||models.every(model=>model.teeth)){updateSegmentationState();return;}
+  const unknown=models.filter(model=>model.jaw==='other');
+  if(unknown.length){segmentationMessage=`请在模型面板为 ${unknown.map(model=>model.name).join('、')} 选择上颌或下颌，随后自动分牙`;$('panel').hidden=false;updateSegmentationState();return;}
   const generation=segmentationGeneration;segmentationRunning=true;segmentationMessage='正在准备自动分牙…';updateSegmentationState();
   try{
     for(const model of [...models]){
       if(model.teeth)continue;
-      if(model.jaw==='other')throw new Error('请返回模型预处理，在模型面板指定所属上颌或下颌后再分牙');
       segmentationMessage=`正在分牙 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
       segmentationAbort=new AbortController();
       const positions=model.mesh.geometry.getAttribute('position').array as Float32Array;
@@ -256,4 +262,4 @@ function updateToothLabels(){
   overlay.innerHTML=entries.map(t=>`<g data-tooth="${t.id}"><line x1="${t.x}" y1="${t.y}" x2="${t.lx}" y2="${t.ly}"/><circle cx="${t.x}" cy="${t.y}" r="${t.r*.14}"/><circle cx="${t.lx}" cy="${t.ly}" r="${t.r}"/><text x="${t.lx}" y="${t.ly}" style="font-size:${t.r*.55}px" dy=".35em">${t.id}</text></g>`).join('');
 }
 function renderFrame(){renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);updateToothLabels();}
-renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();
+renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();updateSegmentationState();
