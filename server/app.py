@@ -6,13 +6,17 @@ import json
 import shlex
 import subprocess
 import threading
+import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
+from refinement.service import process
 
 app = FastAPI()
 lock = threading.Lock()
+refinement_slots = asyncio.Semaphore(1)
 HOST = os.environ.get('DENTAL_SSH_HOST', 'AI牙科客户服务器')
 CONTAINER = os.environ.get('DENTAL_CONTAINER', 'tooth-3d')
 ROOT = os.environ.get('DENTAL_MODEL_ROOT', '/home/yidong/ai-dental-orth/pathology_analysis/inference')
@@ -67,3 +71,27 @@ async def segment(request: Request, jaw: str):
     if not data or len(data) % 36:
         raise HTTPException(400, '需要 Float32 三角面顶点数据')
     return await run_in_threadpool(predict, data, jaw)
+
+
+@app.post('/api/segmentation/refine')
+async def refine_segmentation(request: Request):
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, '模型超过 150 MB')
+    async with refinement_slots:
+        if await request.is_disconnected():
+            raise HTTPException(499, '请求已取消')
+        try:
+            result = await run_in_threadpool(process, data)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        except Exception as error:
+            raise HTTPException(500, f'强平滑失败：{error}') from error
+    return Response(result, media_type='application/octet-stream')
+
+
+@app.get('/api/segmentation/refine/health')
+def refinement_health():
+    return {'preset': 'strong', 'backend': 'local-python'}

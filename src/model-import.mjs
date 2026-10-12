@@ -2,6 +2,8 @@ export function clearModels(group, models) {
   for (const model of models) {
     group.remove(model.mesh);
     model.mesh.geometry.dispose();
+    if(model.source && model.source !== model.mesh.geometry) model.source.dispose();
+    if(model.refined && model.refined !== model.mesh.geometry) model.refined.dispose();
     model.mesh.material.dispose();
   }
   models.length = 0;

@@ -7,7 +7,8 @@ import { clearModels, createModelImporter } from './model-import.mjs';
 import { discoverCases, type LocalCase } from './folder-import.mjs';
 import { createReferenceGrid } from './reference-grid';
 import { createToothLabels } from './tooth-labels';
-import { labelGeometry, objVertexMap, createToothAnnotations, type ToothAnnotation } from './segmentation.mjs';
+import { createToothAnnotations, type ToothAnnotation } from './segmentation.mjs';
+import { objTopology, expandedGeometry, packRefinement, refineSegmentation } from './segmentation-refinement.mjs';
 import './style.css';
 
 const svg = (body: string) => `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -72,7 +73,7 @@ function selectStep(name: string, feature?: string) {
   $('segmentation-hints').hidden = !segmentationActive;
   $('segmentation-actions').hidden = !segmentationActive;
   if(segmentationActive)$('panel').hidden=true;
-  for(const model of models){model.mesh.material.vertexColors=segmentationActive && !!model.teeth;model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;}
+  for(const model of models){model.mesh.geometry=segmentationActive && model.refined ? model.refined : model.source;model.mesh.material.vertexColors=segmentationActive && !!model.teeth;model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;}
   updateSegmentationState();
   $('development-title').textContent = feature || name;
   controls.enabled = viewer;
@@ -98,12 +99,12 @@ controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePann
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
-type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; teeth?: ToothAnnotation[] };
+type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; teeth?: ToothAnnotation[] };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let localResults=false;let localCases:LocalCase[]=[];let importErrors:string[]=[];
 let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
-function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.mesh.geometry.deleteAttribute('color');updateSegmentationState();}
+function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.pendingResult=undefined;model.mesh.geometry=model.source;model.refined?.dispose();model.refined=undefined;updateSegmentationState();}
 function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; if(!w || !h)return;renderer.setSize(w,h); perspectiveCamera.aspect=w/h; perspectiveCamera.updateProjectionMatrix(); orthographicCamera.left=-radius*w/h; orthographicCamera.right=radius*w/h; orthographicCamera.top=radius; orthographicCamera.bottom=-radius; orthographicCamera.updateProjectionMatrix(); }
 function toggleGrid() {
   // Flush damping before changing cameras so toggling cannot add a rotation.
@@ -160,20 +161,20 @@ function renderList() {
     const check=document.createElement('input');check.type='checkbox';check.checked=model.enabled;check.setAttribute('aria-label',`显示 ${model.name}`);check.onchange=()=>{model.enabled=check.checked;applyVisibility();fit();};
     const info=document.createElement('div');info.className='model-info';const name=document.createElement('strong');name.textContent=model.name;name.title=model.name;const detail=document.createElement('small');detail.textContent=`${model.triangles.toLocaleString()} 个三角面`;info.append(name,detail);
     const jaw=document.createElement('select');jaw.setAttribute('aria-label',`${model.name} 所属颌面`);for(const [value,label] of [['upper','上颌'],['lower','下颌'],['other','其他']])jaw.add(new Option(label,value));jaw.value=model.jaw;jaw.disabled=localResults;jaw.onchange=()=>{invalidateSegmentation(model);model.jaw=jaw.value as Model['jaw'];applyVisibility();fit();void runSegmentation();};
-    const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title=`移除 ${model.name}`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{if(!localResults)invalidateSegmentation(model);group.remove(model.mesh);model.mesh.geometry.dispose();model.mesh.material.dispose();models.splice(models.indexOf(model),1);renderList();fit();};
+    const remove=document.createElement('button');remove.className='remove';remove.textContent='×';remove.title=`移除 ${model.name}`;remove.setAttribute('aria-label',remove.title);remove.onclick=()=>{segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';group.remove(model.mesh);model.source.dispose();model.refined?.dispose();model.mesh.material.dispose();models.splice(models.indexOf(model),1);renderList();fit();void runSegmentation();};
     row.append(check,info,jaw,remove);$('models').append(row);
   } applyVisibility();updateSegmentationState();
 }
 function addBuffer(buffer: ArrayBuffer, name: string, result?: unknown) {
-  let geometry=parseModelGeometry(buffer,name); const position=geometry.getAttribute('position');
+  const topology=/\.obj$/i.test(name)?objTopology(buffer):undefined;
+  let geometry=topology?expandedGeometry(topology):parseModelGeometry(buffer,name); const position=geometry.getAttribute('position');
   const triangles=position.count/3;
   geometry.deleteAttribute('normal');geometry.deleteAttribute('color');const original=geometry;geometry=mergeVertices(geometry,0.00001);original.dispose();geometry.computeVertexNormals();geometry.computeBoundingBox();
   const welded=geometry;geometry=welded.toNonIndexed();welded.dispose();
-  let teeth:ToothAnnotation[]|undefined;
-  if(result!==undefined){try{teeth=createToothAnnotations(labelGeometry(geometry,result,/\.obj$/i.test(name)?objVertexMap(buffer):undefined));if(!teeth.length)throw new Error('分牙结果中没有牙齿标签');}catch(error){geometry.dispose();throw error;}}
+  if(result!==undefined){try{packRefinement(geometry.getAttribute('position').array as Float32Array,result,topology);}catch(error){geometry.dispose();throw error;}}
   const opacity=Number($<HTMLInputElement>('opacity').value)/100;const surface=$<HTMLSelectElement>('surface').value;
   const material=new THREE.MeshStandardMaterial({color:0xc7a775,roughness:0.65,metalness:0,side:THREE.DoubleSide,opacity,transparent:opacity<1,depthWrite:opacity===1,flatShading:surface==='flat',wireframe:surface==='wire'});
-  const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles,teeth});
+  const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles,source:geometry,topology,pendingResult:result});
 }
 const importFiles = createModelImporter({
   clear: () => clearModels(group, models),
@@ -190,7 +191,7 @@ const importFiles = createModelImporter({
     if(added)$<HTMLSelectElement>('filter').value='all';
     if(localResults)segmentationMessage=importErrors.length?`本地结果加载失败：${importErrors.join('；')}`:'';
     renderList();fit();
-    if(added&&!localResults)void runSegmentation();
+    if(added)void runSegmentation();
   },
   onError: message=>{importErrors.push(message);toast(message);},
 });
@@ -230,35 +231,43 @@ function updateSegmentationState(){
   const ready=segmentationReady(),busy=!!loading||segmentationRunning;
   const step=document.querySelector<HTMLButtonElement>('[data-step="分牙"]')!;
   step.disabled=!ready;step.classList.toggle('busy',busy);step.classList.toggle('ready',ready);step.setAttribute('aria-busy',String(busy));
-  step.title=busy?(localResults?'正在读取已有分牙结果，完成后可进入':'正在自动分牙，完成后可进入'):ready?'分牙完成，点击查看':models.length?'分牙尚未完成':'请先上传模型';
+  step.title=busy?(segmentationMessage||'正在准备分牙并强平滑，完成后可进入'):ready?'分牙完成，点击查看':models.length?'分牙尚未完成':'请先上传模型';
   $('segmentation-state').hidden=segmentationActive||!segmentationMessage||busy;
   $('segmentation-state').textContent=segmentationMessage;
-  if(!localResults&&models.length&&!busy&&!ready&&models.every(model=>model.jaw!=='other')){const retry=document.createElement('button');retry.textContent='重新分牙';retry.onclick=()=>void runSegmentation();$('segmentation-state').append(retry);}
+  if(models.length&&!busy&&!ready&&(!localResults||!importErrors.length)&&models.every(model=>model.jaw!=='other')){const retry=document.createElement('button');retry.textContent='重试分牙处理';retry.onclick=()=>void runSegmentation();$('segmentation-state').append(retry);}
 }
 async function runSegmentation(){
-  if(localResults){updateSegmentationState();return;}
+  if(localResults&&importErrors.length){updateSegmentationState();return;}
   if(loading||segmentationRunning||!models.length||models.every(model=>model.teeth)){updateSegmentationState();return;}
-  const unknown=models.filter(model=>model.jaw==='other');
+  const unknown=localResults?[]:models.filter(model=>model.jaw==='other');
   if(unknown.length){segmentationMessage=`请在模型面板为 ${unknown.map(model=>model.name).join('、')} 选择上颌或下颌，随后自动分牙`;$('panel').hidden=false;updateSegmentationState();return;}
   const generation=segmentationGeneration;segmentationRunning=true;segmentationMessage='正在准备自动分牙…';updateSegmentationState();
   try{
     for(const model of [...models]){
       if(model.teeth)continue;
-      segmentationMessage=`正在分牙 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
       segmentationAbort=new AbortController();
-      const positions=model.mesh.geometry.getAttribute('position').array as Float32Array;
-      const response=await fetch(`/api/segmentation?jaw=${model.jaw}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Blob([positions.slice().buffer]),signal:segmentationAbort.signal});
-      if(!response.ok){const error=await response.json().catch(()=>null);throw new Error(error?.detail || `分牙服务不可用（${response.status}），请启动本地推理服务`);}
-      const result=await response.json();
-      if(generation!==segmentationGeneration)return;
-      model.teeth=createToothAnnotations(labelGeometry(model.mesh.geometry,result));
-      model.mesh.material.vertexColors=segmentationActive;model.mesh.material.color.set(segmentationActive?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;
+      const positions=model.source.getAttribute('position').array as Float32Array;
+      let result=model.pendingResult;
+      if(result===undefined){
+        segmentationMessage=`正在分牙 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
+        const response=await fetch(`/api/segmentation?jaw=${model.jaw}`,{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:new Blob([positions.slice().buffer]),signal:segmentationAbort.signal});
+        if(!response.ok){const error=await response.json().catch(()=>null);throw new Error(error?.detail || `分牙服务不可用（${response.status}），请启动本地 Python 服务`);}
+        result=await response.json();
+        if(generation!==segmentationGeneration||!models.includes(model))return;
+        model.pendingResult=result;
+      }
+      segmentationMessage=`正在强平滑 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
+      const refined=await refineSegmentation(positions,result,localResults?model.topology:undefined,segmentationAbort.signal);
+      if(generation!==segmentationGeneration||!models.includes(model)){refined.geometry.dispose();return;}
+      model.refined?.dispose();model.refined=refined.geometry;
+      model.teeth=createToothAnnotations(refined.teeth);
+      if(segmentationActive)model.mesh.geometry=model.refined;
     }
     segmentationMessage='';
   }catch(error){
     if(generation!==segmentationGeneration)return;
     segmentationMessage=error instanceof Error?error.message:String(error);
-    if(segmentationMessage==='Failed to fetch')segmentationMessage='无法连接分牙服务，请启动本地推理服务后重试';
+    if(segmentationMessage==='Failed to fetch')segmentationMessage='无法连接本地处理服务，请启动本地 Python 服务后重试';
   }finally{
     if(generation===segmentationGeneration){segmentationRunning=false;updateSegmentationState();}
   }
