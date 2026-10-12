@@ -11,7 +11,7 @@ STRONG = dict(width=1.2, smoothness=6., guide_weight=16., curve_iterations=48,
               curve_cap=.55, island_area=1.)
 
 
-def decode_mesh(data):
+def decode_mesh(data, with_report=False):
     if len(data) < 12:
         raise ValueError('修正数据头不完整')
     version, nv, nf = struct.unpack_from('<III', data)
@@ -26,9 +26,22 @@ def decode_mesh(data):
     if not valid.all() or not np.any(labels != 0):
         raise ValueError('需要 FDI 牙齿标签，牙龈标签为 0')
     tri = vertices[faces]
-    if np.any(np.linalg.norm(np.cross(tri[:, 1]-tri[:, 0], tri[:, 2]-tri[:, 0]), axis=1) <= 1e-15):
-        raise ValueError('模型包含退化面片，请修复模型后重试')
-    return vertices, faces, labels
+    edges = tri[:, [1, 2, 0]] - tri
+    # Match the field solver's minimum edge length as well as zero-area faces.
+    usable = (np.linalg.norm(np.cross(edges[:, 0], -edges[:, 2]), axis=1) > 1e-15)
+    usable &= np.all(np.linalg.norm(edges, axis=2) > 1e-12, axis=1)
+    kept_faces = faces[usable]
+    if not len(kept_faces):
+        raise ValueError('过滤退化面片后没有有效面片，请修复模型后重试')
+    used, inverse = np.unique(kept_faces, return_inverse=True)
+    kept_labels = labels[used]
+    missing_teeth = sorted(set(labels[labels != 0].tolist()) - set(kept_labels.tolist()))
+    if missing_teeth:
+        raise ValueError('过滤退化面片后牙号丢失：' + '、'.join(map(str, missing_teeth)) + '，请修复模型后重试')
+    report = dict(input_faces=int(nf), filtered_degenerate_faces=int(nf-len(kept_faces)),
+                  input_vertices=int(nv), removed_unreferenced_vertices=int(nv-len(used)))
+    decoded = vertices[used], inverse.reshape(-1, 3), kept_labels
+    return (*decoded, report) if with_report else decoded
 
 
 def refine(vertices, faces, labels):
@@ -62,7 +75,9 @@ def refine(vertices, faces, labels):
 
 
 def process(data):
-    positions, normals, labels, report = refine(*decode_mesh(data))
+    vertices, faces, input_labels, cleanup_report = decode_mesh(data, with_report=True)
+    positions, normals, labels, report = refine(vertices, faces, input_labels)
+    report.update(cleanup_report)
     header = json.dumps(dict(version=1, faces=len(labels), report=report), ensure_ascii=False).encode()
     header += b' ' * (-len(header) % 4)
     return (struct.pack('<I', len(header)) + header + positions.astype('<f4').tobytes()
