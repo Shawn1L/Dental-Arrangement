@@ -10,7 +10,7 @@ export function clearModels(group, models) {
 // Only the latest selection may add meshes or update the loading state.
 export function createModelImporter({ clear, add, onStart, onFinish, onError }) {
   let generation = 0;
-  return async function importFiles(files) {
+  return async function importFiles(files, companions) {
     if (!files.length) return;
     const current = ++generation;
     clear();
@@ -29,7 +29,14 @@ export function createModelImporter({ clear, add, onStart, onFinish, onError }) 
       try {
         const buffer = await file.arrayBuffer();
         if (current !== generation) return;
-        add(buffer, file.name);
+        let result;
+        if (companions) {
+          const companion = companions.get(file);
+          if (!companion) throw new Error('缺少同名分牙 JSON 文件');
+          result = JSON.parse(await companion.text());
+          if (current !== generation) return;
+        }
+        add(buffer, file.name, result);
         added++;
       } catch (error) {
         if (current !== generation) return;

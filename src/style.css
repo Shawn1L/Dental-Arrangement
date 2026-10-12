@@ -50,3 +50,8 @@
 #segmentation-state button{margin-left:14px;color:#3896f5;text-decoration:underline}
 @media(max-width:1100px){#segmentation-hints{top:95px;font-size:11px;left:16px}#segmentation-actions{top:95px;right:18px}}
 @media(max-width:760px){.segmentation-stage .views{top:14px;gap:2px}.segmentation-stage .view{width:37px}.segmentation-stage .view svg{width:29px;height:29px}.segmentation-stage .view span{font-size:10px}#segmentation-hints{max-width:calc(100% - 130px);font-size:10px}#adjust-segmentation{padding:8px 12px;font-size:12px}}
+
+#case-picker{position:absolute;top:94px;left:20px;z-index:5;padding:8px 12px;background:#fff;border:1px solid #ddd;border-radius:6px;max-width:calc(100% - 40px)}
+.segmentation-stage #case-picker{display:none}
+#case-select{max-width:260px;margin-left:8px;padding:5px;border:1px solid #ddd;border-radius:4px;background:#fff}
+#single-import{margin:12px auto 0;width:auto}
