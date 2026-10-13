@@ -23,12 +23,12 @@ export function createToothLabels(teeth: ToothAnnotation[]) {
     texture.colorSpace = THREE.SRGBColorSpace;textures.push(texture);
     return texture;
   }
-  function sprite(texture: THREE.Texture, position: number[], radius: number) {
+  function sprite(texture: THREE.Texture, position: number[], radius: number, key?:number) {
     const material = new THREE.SpriteMaterial({ map: texture, depthTest: true, depthWrite: false, transparent: true, toneMapped: false });
     materials.push(material);
     const bubble = new THREE.Sprite(material);
     bubble.position.set(...position as [number, number, number]);bubble.scale.set(radius * 2, radius * 2, 1);
-    bubble.renderOrder = 2;group.add(bubble);
+    bubble.renderOrder = 2;bubble.userData.region=key;group.add(bubble);
   }
   const marker = circleTexture();
   const lineMaterial = new THREE.LineBasicMaterial({ color: '#70b5ff', depthTest: true, depthWrite: false, transparent: true, toneMapped: false });
@@ -38,7 +38,11 @@ export function createToothLabels(teeth: ToothAnnotation[]) {
     geometries.push(geometry);
     const line = new THREE.Line(geometry, lineMaterial);line.renderOrder = 1;group.add(line);
     sprite(marker, tooth.center, tooth.labelRadius * .14);
-    sprite(circleTexture(String(tooth.id)), tooth.labelCenter, tooth.labelRadius);
+    sprite(circleTexture(String(tooth.id)), tooth.labelCenter, tooth.labelRadius, tooth.key);
+    if(tooth.mark) {
+      const position=[...tooth.labelCenter];position[2]+=tooth.labelRadius*2.2;
+      sprite(circleTexture(tooth.mark), position, tooth.labelRadius*.7, tooth.key);
+    }
   }
   return { group, dispose() {
     group.removeFromParent();textures.forEach(texture => texture.dispose());

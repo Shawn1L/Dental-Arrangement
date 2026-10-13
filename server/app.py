@@ -7,14 +7,18 @@ import shlex
 import subprocess
 import threading
 import asyncio
+import time
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
-from refinement.service import process
+from refinement.service import process, source_revision
 
 app = FastAPI()
+SOURCE_REVISION = source_revision()
+logger = logging.getLogger('uvicorn.error')
 lock = threading.Lock()
 refinement_slots = asyncio.Semaphore(1)
 HOST = os.environ.get('DENTAL_SSH_HOST', 'AI牙科客户服务器')
@@ -80,18 +84,27 @@ async def refine_segmentation(request: Request):
         data.extend(chunk)
         if len(data) > MAX_BYTES:
             raise HTTPException(413, '模型超过 150 MB')
+    queued_at = time.perf_counter()
     async with refinement_slots:
+        queue_seconds = time.perf_counter() - queued_at
         if await request.is_disconnected():
             raise HTTPException(499, '请求已取消')
+        started = time.perf_counter()
+        logger.info('refinement request bytes=%d queue_seconds=%.3f', len(data), queue_seconds)
         try:
             result = await run_in_threadpool(process, data)
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
         except Exception as error:
             raise HTTPException(500, f'强平滑失败：{error}') from error
-    return Response(result, media_type='application/octet-stream')
+        compute_seconds = time.perf_counter() - started
+        logger.info('refinement completed queue_seconds=%.3f compute_seconds=%.3f', queue_seconds, compute_seconds)
+    return Response(result, media_type='application/octet-stream', headers={
+        'X-Refinement-Queue-Seconds': f'{queue_seconds:.3f}',
+        'X-Refinement-Compute-Seconds': f'{compute_seconds:.3f}',
+    })
 
 
 @app.get('/api/segmentation/refine/health')
 def refinement_health():
-    return {'preset': 'strong', 'backend': 'local-python'}
+    return {'preset': 'strong', 'backend': 'local-python', 'revision': SOURCE_REVISION}

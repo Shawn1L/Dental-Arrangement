@@ -30,6 +30,9 @@ test('binary response colors faces uniformly and uses area-weighted tooth center
   new Float32Array(buffer,offset,18).set([0,0,0,2,0,0,0,2,0,10,0,0,11,0,0,10,1,0]);
   new Float32Array(buffer,offset+72,18).fill(1);new Uint16Array(buffer,offset+144,2).fill(11);
   const result=decodeRefinement(buffer);
+  assert.deepEqual([...result.faceLabels],[11,11]);
+  new Uint16Array(buffer,offset+144,2)[0]=0;
+  assert.equal(result.faceLabels[0],11,'editable ownership must not alias the response buffer');
   assert.equal(result.teeth.length,1);
   assert.ok(Math.abs(result.teeth[0].center[0]-(2*(2/3)+.5*(31/3))/2.5)<1e-10);
   assert.deepEqual([...result.geometry.attributes.color.array.slice(0,3)], [...result.geometry.attributes.color.array.slice(3,6)]);

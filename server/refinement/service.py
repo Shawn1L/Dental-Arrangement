@@ -2,13 +2,24 @@
 import json
 import struct
 import time
+import logging
+import hashlib
+from pathlib import Path
 import numpy as np
 import trimesh
-from .curves import clean_enclosed_islands, extract_interfaces, trace_chains, smooth_chain
+from .curves import clean_enclosed_islands, extract_interfaces, trace_chains, smooth_chains
 from .partition import guided_fields, partition
+
+logger = logging.getLogger('uvicorn.error')
 
 STRONG = dict(width=1.2, smoothness=6., guide_weight=16., curve_iterations=48,
               curve_cap=.55, island_area=1.)
+
+
+def source_revision():
+    root = Path(__file__).resolve().parent.parent
+    files = [root / 'app.py', *sorted((root / 'refinement').glob('*.py'))]
+    return hashlib.sha256(b''.join(p.read_bytes() for p in files)).hexdigest()
 
 
 def decode_mesh(data, with_report=False):
@@ -46,22 +57,38 @@ def decode_mesh(data, with_report=False):
 
 def refine(vertices, faces, labels):
     start = time.perf_counter()
+    stages = {}
+    stage_start = start
+    def mark(name):
+        nonlocal stage_start
+        now = time.perf_counter()
+        stages[name] = now - stage_start
+        stage_start = now
+        logger.info('refinement stage=%s seconds=%.3f vertices=%d faces=%d', name, stages[name], len(vertices), len(faces))
     original_ids = set(labels.tolist())
     labels, changes = clean_enclosed_islands(vertices, faces, labels, STRONG['island_area'])
     if set(labels.tolist()) != original_ids:
         raise ValueError('孤岛清理会丢失标签，已阻止展示')
+    mark('island_cleanup')
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     points, _, pairs = extract_interfaces(vertices, faces, labels)
-    curves = []
+    mark('interface_extract')
+    inputs, pairs_for_curves = [], []
     for pair, edges in sorted(pairs.items()):
         chains, _ = trace_chains(edges)
         for chain in chains:
-            smooth, face_ids, bary, _ = smooth_chain(mesh, points[chain], chain[0] == chain[-1],
-                                                    STRONG['curve_iterations'], STRONG['curve_cap'])
-            curves.append(dict(labels=pair, smooth=smooth, smooth_face_ids=face_ids, smooth_barycentric=bary))
+            inputs.append((points[chain], chain[0] == chain[-1]))
+            pairs_for_curves.append(pair)
+    curves = []
+    for pair, (smooth, face_ids, bary, _) in zip(pairs_for_curves, smooth_chains(
+            mesh, inputs, STRONG['curve_iterations'], STRONG['curve_cap'])):
+        curves.append(dict(labels=pair, smooth=smooth, smooth_face_ids=face_ids, smooth_barycentric=bary))
+    mark('curve_smoothing')
     ids, fields, band, field_report = guided_fields(vertices, faces, labels, curves,
         STRONG['width'], STRONG['smoothness'], STRONG['guide_weight'])
+    mark('field_solve')
     result = partition(vertices, faces, ids, fields)
+    mark('partition')
     positions, normals, region_labels, _, _, _, report = result
     if not np.isfinite(positions).all() or not np.isfinite(normals).all() or report['max_source_reconstruction_error'] > 1e-8:
         raise ValueError('修正几何未通过源面重建检查')
@@ -69,15 +96,18 @@ def refine(vertices, faces, labels):
         raise ValueError('强平滑丢失标签，已阻止展示')
     if not np.array_equal(fields[~band], (labels[:, None] == ids)[~band]):
         raise ValueError('修正超出边界带')
-    report.update(field_report, preset='strong', settings=STRONG, source_faces=len(faces),
+    mark('validation')
+    report.update(field_report, stage_seconds=stages, curve_count=len(curves), preset='strong', settings=STRONG, source_faces=len(faces),
                   cleaned_components=len(changes), elapsed_seconds=time.perf_counter()-start)
     return positions, normals, region_labels, report
 
 
 def process(data):
+    start = time.perf_counter()
     vertices, faces, input_labels, cleanup_report = decode_mesh(data, with_report=True)
+    decode_seconds = time.perf_counter() - start
     positions, normals, labels, report = refine(vertices, faces, input_labels)
-    report.update(cleanup_report)
+    report.update(cleanup_report, decode_seconds=decode_seconds)
     header = json.dumps(dict(version=1, faces=len(labels), report=report), ensure_ascii=False).encode()
     header += b' ' * (-len(header) % 4)
     return (struct.pack('<I', len(header)) + header + positions.astype('<f4').tobytes()

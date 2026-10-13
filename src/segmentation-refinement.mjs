@@ -78,7 +78,7 @@ export function decodeRefinement(buffer) {
   const geometry = new BufferGeometry().setAttribute('position', new Float32BufferAttribute(positions, 3))
     .setAttribute('normal', new Float32BufferAttribute(normals, 3)).setAttribute('color', new Float32BufferAttribute(colors, 3));
   geometry.computeBoundingBox();
-  return { geometry, teeth, report: header.report };
+  return { geometry, teeth, faceLabels: labels.slice(), report: header.report };
 }
 
 export async function refineSegmentation(positions, result, topology, signal) {

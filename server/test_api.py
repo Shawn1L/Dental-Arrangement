@@ -51,6 +51,10 @@ class AdapterTest(unittest.TestCase):
         import json
         header=json.loads(response.content[4:4+size])
         self.assertEqual(header['report']['settings'],STRONG)
+        self.assertGreaterEqual(float(response.headers['X-Refinement-Queue-Seconds']),0)
+        self.assertGreaterEqual(float(response.headers['X-Refinement-Compute-Seconds']),0)
+        self.assertEqual(set(header['report']['stage_seconds']),{'island_cleanup','interface_extract','curve_smoothing','field_solve','partition','validation'})
+        self.assertEqual(self.client.get('/api/segmentation/refine/health').json()['revision'],app.SOURCE_REVISION)
         self.assertLess(header['report']['max_face_area_relative_error'],1e-7)
         labels=np.frombuffer(response.content,'<u2',offset=4+size+header['faces']*72)
         self.assertEqual(set(labels),{0,11})

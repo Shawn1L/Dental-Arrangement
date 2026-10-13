@@ -7,6 +7,8 @@ import { clearModels, createModelImporter } from './model-import.mjs';
 import { discoverCases, type LocalCase } from './folder-import.mjs';
 import { createReferenceGrid } from './reference-grid';
 import { createToothLabels } from './tooth-labels';
+import { createAdjustment } from './adjustment';
+import type { EditableJaw } from './segmentation-editor.mjs';
 import { createToothAnnotations, type ToothAnnotation } from './segmentation.mjs';
 import { objTopology, expandedGeometry, packRefinement, refineSegmentation } from './segmentation-refinement.mjs';
 import './style.css';
@@ -22,7 +24,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="牙模三维查看器"></main>
   <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>查看时，请用鼠标左右键旋转模型，用中键平移模型</li></ul></div>
-  <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary" aria-disabled="true" title="调整分牙功能暂未开发">调整分牙</button></div>
+  <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary">调整分牙</button></div>
   <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
   <div id="case-picker" hidden><label>病例 <select id="case-select" aria-label="选择病例"></select></label></div><div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择数据文件夹">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择数据文件夹</span></button></div>
@@ -54,10 +56,12 @@ camera.position.set(0,0,200);
 const controls = new OrbitControls(camera, renderer.domElement);
 let segmentationActive = false;
 let showToothNumbers = false;
+let adjustment:ReturnType<typeof createAdjustment>|undefined;
 const featureBar = document.querySelector<HTMLElement>('.feature-bar')!;
 const preprocessingFeatures = featureBar.innerHTML;
 const toothIcon = '<path d="M9 5c3-2 4 1 7 1s4-3 7-1c5 4 1 10 0 14s-2 9-4 8-1-8-3-8-1 8-3 8-3-6-4-9S5 8 9 5z"/><circle cx="25" cy="23" r="5"/><path d="m23 23 1 1 3-3"/>';
 function selectStep(name: string, feature?: string) {
+  if(adjustment?.active){adjustment.guard(()=>selectStep(name,feature));return;}
   if(name===steps[1]&&!segmentationReady())return;
   const preprocessing = name === steps[0] && !feature;
   segmentationActive = name === steps[1];
@@ -99,12 +103,13 @@ controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePann
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
-type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; teeth?: ToothAnnotation[] };
+type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; teeth?: ToothAnnotation[];faceLabels?:Uint16Array;editable?:EditableJaw };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let localResults=false;let localCases:LocalCase[]=[];let importErrors:string[]=[];
 let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
+function clearToast(){ $('toast').hidden=true;clearTimeout(toastTimer); }
 function toast(message: string) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = window.setTimeout(()=> $('toast').hidden = true,5000); }
-function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.pendingResult=undefined;model.mesh.geometry=model.source;model.refined?.dispose();model.refined=undefined;updateSegmentationState();}
+function invalidateSegmentation(model:Model){segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';model.teeth=undefined;model.faceLabels=undefined;model.editable=undefined;model.pendingResult=undefined;model.mesh.geometry=model.source;model.refined?.dispose();model.refined=undefined;updateSegmentationState();}
 function resize() { const w=viewport.clientWidth,h=viewport.clientHeight; if(!w || !h)return;renderer.setSize(w,h); perspectiveCamera.aspect=w/h; perspectiveCamera.updateProjectionMatrix(); orthographicCamera.left=-radius*w/h; orthographicCamera.right=radius*w/h; orthographicCamera.top=radius; orthographicCamera.bottom=-radius; orthographicCamera.updateProjectionMatrix(); }
 function toggleGrid() {
   // Flush damping before changing cameras so toggling cannot add a rotation.
@@ -195,21 +200,27 @@ const importFiles = createModelImporter({
   },
   onError: message=>{importErrors.push(message);toast(message);},
 });
-function uploadSingle(files:File[]){if(!files.length)return;localResults=false;localCases=[];$('case-picker').hidden=true;void importFiles(files);}
+function uploadSingle(files:File[]){if(!files.length)return;if(adjustment?.active){adjustment.guard(()=>uploadSingle(files));return;}localResults=false;localCases=[];$('case-picker').hidden=true;void importFiles(files);}
 function loadCase(index:number){
+  if(adjustment?.active){$<HTMLSelectElement>('case-select').value=String(loadedCase);adjustment.guard(()=>loadCase(index));return;}
   const item=localCases[index];if(!item)return;
-  localResults=true;
+  loadedCase=index;$<HTMLSelectElement>('case-select').value=String(index);localResults=true;
   void importFiles(item.entries.map(entry=>entry.file),new Map(item.entries.map(entry=>[entry.file,entry.result])));
 }
-const folderInput=$<HTMLInputElement>('folder-input');
-folderInput.onchange=()=>{
-  const files=Array.from(folderInput.files||[]);folderInput.value='';if(!files.length)return;
+let loadedCase=0;
+function uploadFolder(files:File[]){
+  if(adjustment?.active){adjustment.guard(()=>uploadFolder(files));return;}
   const discovered=discoverCases(files);
   if(!discovered.length){toast('文件夹中未找到以 _upper / _lower 命名的 STL 或 OBJ 模型');return;}
   localCases=discovered;
   const select=$<HTMLSelectElement>('case-select');select.replaceChildren();
   localCases.forEach((item,index)=>select.add(new Option(item.name,String(index))));
   $('case-picker').hidden=localCases.length<2;loadCase(0);
+}
+const folderInput=$<HTMLInputElement>('folder-input');
+folderInput.onchange=()=>{
+  const files=Array.from(folderInput.files||[]);folderInput.value='';if(!files.length)return;
+  uploadFolder(files);
 };
 $('case-select').onchange=()=>loadCase(Number($<HTMLSelectElement>('case-select').value));
 const input=$<HTMLInputElement>('file-input');input.onchange=()=>{uploadSingle(Array.from(input.files||[]));input.value='';};
@@ -260,6 +271,7 @@ async function runSegmentation(){
       const refined=await refineSegmentation(positions,result,localResults?model.topology:undefined,segmentationAbort.signal);
       if(generation!==segmentationGeneration||!models.includes(model)){refined.geometry.dispose();return;}
       model.refined?.dispose();model.refined=refined.geometry;
+      model.faceLabels=refined.faceLabels;model.editable=undefined;
       model.teeth=createToothAnnotations(refined.teeth);
       if(segmentationActive)model.mesh.geometry=model.refined;
     }
@@ -278,7 +290,7 @@ function updateToothLabels(){
     if(!models.includes(model)||model.teeth!==entry.teeth){entry.visual.dispose();toothLabels.delete(model);}
   }
   for(const model of models){
-    const visible=segmentationActive&&showToothNumbers&&model.mesh.visible&&!!model.teeth;
+    const visible=segmentationActive&&!adjustment?.active&&showToothNumbers&&model.mesh.visible&&!!model.teeth;
     let entry=toothLabels.get(model);
     if(visible&&!entry){
       entry={teeth:model.teeth!,visual:createToothLabels(model.teeth!)};
@@ -289,5 +301,7 @@ function updateToothLabels(){
     if(visible){model.mesh.updateWorldMatrix(true,false);entry.visual.group.matrix.copy(model.mesh.matrixWorld);}
   }
 }
-function renderFrame(){updateToothLabels();renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);}
+adjustment=createAdjustment({scene,canvas:renderer.domElement,controls,camera:()=>camera,models:()=>models,toast,clearToast,fit,finish:()=>{selectStep(steps[1]);applyVisibility();fit();}});
+$('adjust-segmentation').onclick=()=>adjustment!.enter();
+function renderFrame(){updateToothLabels();adjustment?.frame();renderer.render(scene,camera);if(gridEnabled && !segmentationActive)referenceGrid.render(renderer,orthographicCamera);}
 renderer.setAnimationLoop(()=>{if(!$('workspace').hidden){controls.update();renderFrame();}});resize();applyVisibility();updateSegmentationState();

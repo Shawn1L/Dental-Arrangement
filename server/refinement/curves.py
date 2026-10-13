@@ -140,30 +140,53 @@ def project(mesh, points):
     return closest, face_ids, bary
 
 
-def smooth_chain(mesh, raw, closed, iterations, cap):
-    # Subdivide on the original piecewise-linear contour before smoothing.
-    dense = [raw[0]]
-    for a, b in zip(raw[:-1], raw[1:]):
-        count = max(1, int(np.ceil(np.linalg.norm(b - a) / 0.25)))
-        dense.extend(a + (b - a) * i / count for i in range(1, count + 1))
-    anchor = np.asarray(dense[:-1] if closed else dense)
-    points = anchor.copy()
+def smooth_chains(mesh, chains, iterations, cap):
+    """Project all independent contours together once per iteration.
+
+    Trimesh rebuilds its nearest-vertex KD-tree on every proximity call.
+    Batching avoids one full-mesh rebuild per contour while keeping each
+    contour's neighbors, fixed endpoints and displacement cap independent.
+    """
+    anchors, closed_flags = [], []
+    for raw, closed in chains:
+        dense = [raw[0]]
+        for a, b in zip(raw[:-1], raw[1:]):
+            count = max(1, int(np.ceil(np.linalg.norm(b - a) / 0.25)))
+            dense.extend(a + (b - a) * i / count for i in range(1, count + 1))
+        anchors.append(np.asarray(dense[:-1] if closed else dense))
+        closed_flags.append(closed)
+    if not anchors:
+        return []
+    offsets = np.r_[0, np.cumsum([len(a) for a in anchors])]
+    points = np.concatenate(anchors)
+    anchor = points.copy()
     for _ in range(iterations):
-        proposal = 0.5 * points + 0.25 * (np.roll(points, 1, axis=0) + np.roll(points, -1, axis=0))
-        if not closed:
-            proposal[[0, -1]] = anchor[[0, -1]]
-        projected, _, _ = project(mesh, proposal)
-        # Reject excessive moves rather than clipping off the source surface.
+        proposals = []
+        for i, closed in enumerate(closed_flags):
+            part = points[offsets[i]:offsets[i + 1]]
+            proposal = 0.5 * part + 0.25 * (np.roll(part, 1, axis=0) + np.roll(part, -1, axis=0))
+            if not closed:
+                proposal[[0, -1]] = anchors[i][[0, -1]]
+            proposals.append(proposal)
+        projected, _, _ = project(mesh, np.concatenate(proposals))
         allowed = np.linalg.norm(projected - anchor, axis=1) <= cap
         points[allowed] = projected[allowed]
     points, face_ids, bary = project(mesh, points)
-    if not closed:
-        points[[0, -1]] = anchor[[0, -1]]
-    if closed:
-        points = np.vstack((points, points[0]))
-        face_ids = np.r_[face_ids, face_ids[0]]
-        bary = np.vstack((bary, bary[0]))
-        anchor = np.vstack((anchor, anchor[0]))
-    return points, face_ids, bary, float(np.linalg.norm(points - anchor, axis=1).max(initial=0))
+    result = []
+    for i, closed in enumerate(closed_flags):
+        section = slice(offsets[i], offsets[i + 1])
+        part, ids, weights = points[section].copy(), face_ids[section].copy(), bary[section].copy()
+        original = anchors[i]
+        if not closed:
+            part[[0, -1]] = original[[0, -1]]
+        if closed:
+            part = np.vstack((part, part[0]))
+            ids = np.r_[ids, ids[0]]
+            weights = np.vstack((weights, weights[0]))
+            original = np.vstack((original, original[0]))
+        result.append((part, ids, weights, float(np.linalg.norm(part - original, axis=1).max(initial=0))))
+    return result
 
 
+def smooth_chain(mesh, raw, closed, iterations, cap):
+    return smooth_chains(mesh, [(raw, closed)], iterations, cap)[0]

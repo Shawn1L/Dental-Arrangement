@@ -27,3 +27,9 @@ test('invalid labels fail before applying any colors to the uploaded mesh',()=>{
   assert.equal(geometry.getAttribute('color'),undefined);
   const teeth=labelGeometry(geometry,{labels:[11,11,0]});assert.deepEqual(teeth,[{id:11,center:[.5,0,0]}]);geometry.dispose();
 });
+
+test('validation accepts deciduous FDI and explains exact allowed ranges',()=>{
+  const geometry=triangle();assert.equal(labelGeometry(geometry,{labels:[51,65,85]}).length,3);
+  for(const id of [19,56,66,86])assert.throws(()=>labelGeometry(geometry,{labels:[id,0,0]}),/恒牙 11–18.*乳牙 51–55.*81–85/);
+  geometry.dispose();
+});

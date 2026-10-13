@@ -1,13 +1,13 @@
 import { Color, Float32BufferAttribute } from 'three';
 
 export const GUM_COLOR = '#c7a775';
-const light = ['#5279c7', '#9470be', '#c05b96', '#77b744', '#50b9b6', '#cc8a70', '#6867bb', '#b59e69'];
-const dark = ['#304e97', '#8050ad', '#b24b8c', '#579d30', '#279c9b', '#ad694f', '#494b9a', '#947d50'];
-export function isTooth(id) { return Number.isInteger(id) && id >= 11 && id <= 48 && id % 10 >= 1 && id % 10 <= 8; }
+const light = ['#5279c7', '#9470be', '#c05b96', '#77b744', '#50b9b6', '#cc8a70', '#6867bb', '#d46936'];
+const dark = ['#304e97', '#8050ad', '#b24b8c', '#579d30', '#279c9b', '#ad694f', '#494b9a', '#b34c25'];
+export function isTooth(id) { return Number.isInteger(id) && ((id >= 11 && id <= 48 && id % 10 >= 1 && id % 10 <= 8) || (id >= 51 && id <= 85 && id % 10 >= 1 && id % 10 <= 5)); }
 export function toothColor(id) {
   if (!isTooth(id)) return GUM_COLOR;
   const quadrant = Math.floor(id / 10);
-  return (quadrant === 1 || quadrant === 3 ? light : dark)[id % 10 - 1];
+  return (quadrant % 2 === 1 ? light : dark)[id % 10 - 1];
 }
 
 // Anchors live in the model's XY dental arch plane, independent of the camera,
@@ -50,7 +50,7 @@ export function objVertexMap(buffer) {
 export function labelGeometry(geometry, result, sourceMap) {
   const labels = result?.labels;
   if (!Array.isArray(labels) || !labels.length) throw new Error('分牙结果需要非空 labels 数组');
-  if (labels.some(id => id !== 0 && !isTooth(id))) throw new Error('牙号必须为 FDI 11–48，牙龈为 0');
+  if (labels.some(id => id !== 0 && !isTooth(id))) throw new Error('牙号必须为 FDI 恒牙 11–18、21–28、31–38、41–48 或乳牙 51–55、61–65、71–75、81–85，牙龈为 0');
   const position = geometry.getAttribute('position');
   const mapping = sourceMap && labels.length === sourceMap.count ? sourceMap.indices : null;
   if ((!mapping && labels.length !== position.count) || (mapping && mapping.length !== position.count)) throw new Error('标签数量与上传模型顶点不匹配，请使用同一模型的分牙结果');

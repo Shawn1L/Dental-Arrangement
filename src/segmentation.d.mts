@@ -3,7 +3,7 @@ export const GUM_COLOR: string;
 export function isTooth(id: number): boolean;
 export function toothColor(id: number): string;
 export type SourceMap = { count: number; indices: Uint32Array };
-export type Tooth = { id: number; center: number[] };
+export type Tooth = { id: number|'S'; center: number[]; key?:number; mark?:'B'|'I'|null };
 export type ToothAnnotation = Tooth & { labelCenter: number[]; labelRadius: number };
 export function createToothAnnotations(teeth: Tooth[]): ToothAnnotation[];
 export function objVertexMap(buffer: ArrayBuffer): SourceMap;
