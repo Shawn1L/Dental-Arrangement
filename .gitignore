@@ -3,3 +3,5 @@ dist/
 *.log
 .DS_Store
 test-results/
+.env.local
+.env.*.local
