@@ -3,5 +3,7 @@ dist/
 *.log
 .DS_Store
 test-results/
+__pycache__/
+.venv/
 .env.local
 .env.*.local
