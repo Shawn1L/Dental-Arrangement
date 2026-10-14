@@ -1,0 +1,218 @@
+[
+  {
+    "id": "case-01",
+    "name": "案例-01",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-01_lower.obj",
+        "result": "case-01_lower.json",
+        "size": 5509522
+      },
+      {
+        "jaw": "upper",
+        "model": "case-01_upper.obj",
+        "result": "case-01_upper.json",
+        "size": 6865611
+      }
+    ]
+  },
+  {
+    "id": "case-02",
+    "name": "案例-02",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-02_lower.obj",
+        "result": "case-02_lower.json",
+        "size": 7922121
+      },
+      {
+        "jaw": "upper",
+        "model": "case-02_upper.obj",
+        "result": "case-02_upper.json",
+        "size": 12539864
+      }
+    ]
+  },
+  {
+    "id": "case-03",
+    "name": "案例-03",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-03_lower.obj",
+        "result": "case-03_lower.json",
+        "size": 6022229
+      },
+      {
+        "jaw": "upper",
+        "model": "case-03_upper.obj",
+        "result": "case-03_upper.json",
+        "size": 9423655
+      }
+    ]
+  },
+  {
+    "id": "case-04",
+    "name": "案例-04",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-04_lower.obj",
+        "result": "case-04_lower.json",
+        "size": 7899294
+      },
+      {
+        "jaw": "upper",
+        "model": "case-04_upper.obj",
+        "result": "case-04_upper.json",
+        "size": 9080104
+      }
+    ]
+  },
+  {
+    "id": "case-05",
+    "name": "案例-05",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-05_lower.obj",
+        "result": "case-05_lower.json",
+        "size": 7122223
+      },
+      {
+        "jaw": "upper",
+        "model": "case-05_upper.obj",
+        "result": "case-05_upper.json",
+        "size": 10443991
+      }
+    ]
+  },
+  {
+    "id": "case-06",
+    "name": "案例-06",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-06_lower.obj",
+        "result": "case-06_lower.json",
+        "size": 6871474
+      },
+      {
+        "jaw": "upper",
+        "model": "case-06_upper.obj",
+        "result": "case-06_upper.json",
+        "size": 9093197
+      }
+    ]
+  },
+  {
+    "id": "case-07",
+    "name": "案例-07",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-07_lower.obj",
+        "result": "case-07_lower.json",
+        "size": 6893135
+      },
+      {
+        "jaw": "upper",
+        "model": "case-07_upper.obj",
+        "result": "case-07_upper.json",
+        "size": 9106338
+      }
+    ]
+  },
+  {
+    "id": "case-08",
+    "name": "案例-08",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-08_lower.obj",
+        "result": "case-08_lower.json",
+        "size": 9815972
+      },
+      {
+        "jaw": "upper",
+        "model": "case-08_upper.obj",
+        "result": "case-08_upper.json",
+        "size": 12648297
+      }
+    ]
+  },
+  {
+    "id": "case-09",
+    "name": "案例-09",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-09_lower.obj",
+        "result": "case-09_lower.json",
+        "size": 7571257
+      },
+      {
+        "jaw": "upper",
+        "model": "case-09_upper.obj",
+        "result": "case-09_upper.json",
+        "size": 12018196
+      }
+    ]
+  },
+  {
+    "id": "case-10",
+    "name": "案例-10",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-10_lower.obj",
+        "result": "case-10_lower.json",
+        "size": 8407675
+      },
+      {
+        "jaw": "upper",
+        "model": "case-10_upper.obj",
+        "result": "case-10_upper.json",
+        "size": 11060249
+      }
+    ]
+  },
+  {
+    "id": "case-11",
+    "name": "案例-11",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-11_lower.obj",
+        "result": "case-11_lower.json",
+        "size": 4390763
+      },
+      {
+        "jaw": "upper",
+        "model": "case-11_upper.obj",
+        "result": "case-11_upper.json",
+        "size": 7191448
+      }
+    ]
+  },
+  {
+    "id": "case-12",
+    "name": "案例-12",
+    "entries": [
+      {
+        "jaw": "lower",
+        "model": "case-12_lower.obj",
+        "result": "case-12_lower.json",
+        "size": 8630585
+      },
+      {
+        "jaw": "upper",
+        "model": "case-12_upper.obj",
+        "result": "case-12_upper.json",
+        "size": 12945840
+      }
+    ]
+  }
+]

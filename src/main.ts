@@ -5,6 +5,8 @@ import { inferJaw } from './stl.mjs';
 import { parseModelGeometry } from './model-loader.mjs';
 import { clearModels, createModelImporter } from './model-import.mjs';
 import { discoverCases, type LocalCase } from './folder-import.mjs';
+import { createPreloadedCases, loadPreloadedRefinement } from './preloaded.mjs';
+import preloadedCatalog from './preloaded-cases.json';
 import { createReferenceGrid } from './reference-grid';
 import { createToothLabels } from './tooth-labels';
 import { createAdjustment } from './adjustment';
@@ -20,16 +22,17 @@ const views = [ ['upper','上颌面',arch], ['front','正面',bite], ['right','�
 const steps = ['模型预处理', '分牙', '初始位模型', '治疗计划', '目标位', '分步', '附件'];
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <header class="workflow-header"><div class="workflow-brand">${svg(arch)}<span>STL <b>STUDIO</b></span></div><nav class="steps" aria-label="工作流程步骤">${steps.map((name,index)=>`<button class="step ${index===0?'active':''}" data-step="${name}" aria-pressed="${index===0}"><span class="step-number">${index+1}</span><span>${name}</span></button>${index<steps.length-1?'<span class="step-arrow" aria-hidden="true">›</span>':''}`).join('')}</nav></header>
-  <nav class="feature-bar" aria-label="预处理功能"><button data-feature="网格" aria-pressed="false" title="开启网格并切换正交投影">${svg('<rect x="6" y="6" width="20" height="20" rx="1"/><path d="M6 13h20M6 20h20M13 6v20M20 6v20"/>')}<span>网格</span></button><button data-feature="咬合碰撞">${svg(bite)}<span>咬合碰撞</span></button><button data-feature="模型调整">${svg('<path d="M6 9h20M6 16h20M6 23h20"/><circle cx="12" cy="9" r="3" fill="#3d3d3d"/><circle cx="21" cy="16" r="3" fill="#3d3d3d"/><circle cx="12" cy="23" r="3" fill="#3d3d3d"/>')}<span>模型调整</span></button></nav>
+  <nav class="feature-bar" aria-label="预处理功能"><button data-feature="网格" aria-pressed="false" title="开启网格并切换正交投影">${svg('<rect x="6" y="6" width="20" height="20" rx="1"/><path d="M6 13h20M6 20h20M13 6v20M20 6v20"/>')}<span>网格</span></button><button data-feature="咬合碰撞">${svg(bite)}<span>咬合碰撞</span></button></nav>
   <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="牙模三维查看器"></main>
   <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>查看时，请用鼠标左右键旋转模型，用中键平移模型</li></ul></div>
+  <div id="model-adjustment-actions"><button id="adjust-model" class="primary">调整模型</button></div>
   <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary">调整分牙</button></div>
   <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
-  <div id="case-picker" hidden><label>病例 <select id="case-select" aria-label="选择病例"></select></label></div><div class="top-actions"><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择数据文件夹">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择数据文件夹</span></button></div>
+  <div id="case-picker" hidden><label>病例 <select id="case-select" aria-label="选择病例"></select></label></div><div class="top-actions"><button id="preloaded-import" class="preloaded-button">预载数据</button><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择数据文件夹">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择数据文件夹</span></button></div>
   <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择数据文件夹</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 读取文件夹中的已有分牙结果</p></aside>
-  <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>加载牙模数据</h1><p>选择包含上下颌模型和分牙 JSON 的整个文件夹<br/>自动读取已有分牙结果，支持多个病例切换</p><button id="empty-import" class="primary">选择数据文件夹</button><button id="single-import" class="add-model">单独上传 STL / OBJ</button><small>支持 OBJ / STL + 同名 JSON · 单模型最大 150 MB</small></section>
+  <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>加载牙模数据</h1><p>选择包含上下颌模型和分牙 JSON 的整个文件夹<br/>自动读取已有分牙结果，支持多个病例切换</p><button id="empty-preloaded" class="primary">加载预载数据 · 12 组案例</button><button id="empty-import" class="add-model">选择数据文件夹</button><button id="single-import" class="add-model">单独上传 STL / OBJ</button><small>支持 OBJ / STL + 同名 JSON · 单模型最大 150 MB</small></section>
   <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待选择数据文件夹</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>滚轮缩放</div><span class="view-info"><span id="projection-label">透视投影</span><span id="dimensions">模型坐标单位</span></span></footer>
   <div class="bottom-tools"><button id="fit" class="icon-button" title="适应窗口（F）" aria-label="适应窗口">${svg('<path d="M12 6H6v6m14-6h6v6M6 20v6h6m14-6v6h-6"/>')}</button><button id="reset" class="icon-button" title="恢复初始视图" aria-label="恢复初始视图">${svg('<path d="M7 13a10 10 0 1 1 1 12M7 5v8h8"/>')}</button><span class="divider"></span><button id="screenshot" class="icon-button" title="导出 PNG 截图" aria-label="导出 PNG 截图">${svg('<path d="M4 10h7l2-4h6l2 4h7v16H4z"/><circle cx="16" cy="18" r="5"/>')}</button></div>
   </section>
@@ -76,6 +79,7 @@ function selectStep(name: string, feature?: string) {
   $('workspace').setAttribute('aria-label',segmentationActive ? '分牙' : '模型预处理');
   $('segmentation-hints').hidden = !segmentationActive;
   $('segmentation-actions').hidden = !segmentationActive;
+  $('model-adjustment-actions').hidden = !preprocessing;
   if(segmentationActive)$('panel').hidden=true;
   for(const model of models){model.mesh.geometry=segmentationActive && model.refined ? model.refined : model.source;model.mesh.material.vertexColors=segmentationActive && !!model.teeth;model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.needsUpdate=true;}
   updateSegmentationState();
@@ -98,12 +102,13 @@ function bindFeatures(){document.querySelectorAll<HTMLButtonElement>('[data-feat
   else selectStep(steps[0],button.dataset.feature);
 });}bindFeatures();
 $('back-preprocessing').onclick=()=>selectStep(steps[0]);
+$('adjust-model').onclick=()=>selectStep(steps[0],'模型调整');
 controls.enableDamping = true; controls.dampingFactor = 0.09; controls.minZoom = 0.08; controls.maxZoom = 25;
 controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePanning = true;
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
-type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; teeth?: ToothAnnotation[];faceLabels?:Uint16Array;editable?:EditableJaw };
+type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; refinementUrl?: string; teeth?: ToothAnnotation[];faceLabels?:Uint16Array;editable?:EditableJaw };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let localResults=false;let localCases:LocalCase[]=[];let importErrors:string[]=[];
 let segmentationGeneration=0;let segmentationRunning=false;let segmentationAbort:AbortController|undefined;let segmentationMessage='';
@@ -170,7 +175,7 @@ function renderList() {
     row.append(check,info,jaw,remove);$('models').append(row);
   } applyVisibility();updateSegmentationState();
 }
-function addBuffer(buffer: ArrayBuffer, name: string, result?: unknown) {
+function addBuffer(buffer: ArrayBuffer, name: string, result?: unknown, refinementUrl?: string) {
   const topology=/\.obj$/i.test(name)?objTopology(buffer):undefined;
   let geometry=topology?expandedGeometry(topology):parseModelGeometry(buffer,name); const position=geometry.getAttribute('position');
   const triangles=position.count/3;
@@ -179,7 +184,7 @@ function addBuffer(buffer: ArrayBuffer, name: string, result?: unknown) {
   if(result!==undefined){try{packRefinement(geometry.getAttribute('position').array as Float32Array,result,topology);}catch(error){geometry.dispose();throw error;}}
   const opacity=Number($<HTMLInputElement>('opacity').value)/100;const surface=$<HTMLSelectElement>('surface').value;
   const material=new THREE.MeshStandardMaterial({color:0xc7a775,roughness:0.65,metalness:0,side:THREE.DoubleSide,opacity,transparent:opacity<1,depthWrite:opacity===1,flatShading:surface==='flat',wireframe:surface==='wire'});
-  const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles,source:geometry,topology,pendingResult:result});
+  const mesh=new THREE.Mesh(geometry,material);group.add(mesh);models.push({id:nextId++,name,jaw:inferJaw(name),enabled:true,mesh,triangles,source:geometry,topology,pendingResult:result,refinementUrl});
 }
 const importFiles = createModelImporter({
   clear: () => clearModels(group, models),
@@ -205,17 +210,24 @@ function loadCase(index:number){
   if(adjustment?.active){$<HTMLSelectElement>('case-select').value=String(loadedCase);adjustment.guard(()=>loadCase(index));return;}
   const item=localCases[index];if(!item)return;
   loadedCase=index;$<HTMLSelectElement>('case-select').value=String(index);localResults=true;
-  void importFiles(item.entries.map(entry=>entry.file),new Map(item.entries.map(entry=>[entry.file,entry.result])));
+  void importFiles(item.entries.map(entry=>entry.file),new Map(item.entries.map(entry=>[entry.file,entry.result])),new Map(item.entries.map(entry=>[entry.file,entry.refinementUrl])));
 }
 let loadedCase=0;
+function showCases(cases:LocalCase[]){
+  localCases=cases;
+  const select=$<HTMLSelectElement>('case-select');select.replaceChildren();
+  localCases.forEach((item,index)=>select.add(new Option(item.name,String(index))));
+  $('case-picker').hidden=localCases.length<2;loadCase(0);
+}
+function loadPreloaded(){
+  if(adjustment?.active){adjustment.guard(loadPreloaded);return;}
+  showCases(createPreloadedCases(preloadedCatalog,import.meta.env.BASE_URL));
+}
 function uploadFolder(files:File[]){
   if(adjustment?.active){adjustment.guard(()=>uploadFolder(files));return;}
   const discovered=discoverCases(files);
   if(!discovered.length){toast('文件夹中未找到以 _upper / _lower 命名的 STL 或 OBJ 模型');return;}
-  localCases=discovered;
-  const select=$<HTMLSelectElement>('case-select');select.replaceChildren();
-  localCases.forEach((item,index)=>select.add(new Option(item.name,String(index))));
-  $('case-picker').hidden=localCases.length<2;loadCase(0);
+  showCases(discovered);
 }
 const folderInput=$<HTMLInputElement>('folder-input');
 folderInput.onchange=()=>{
@@ -226,6 +238,7 @@ $('case-select').onchange=()=>loadCase(Number($<HTMLSelectElement>('case-select'
 const input=$<HTMLInputElement>('file-input');input.onchange=()=>{uploadSingle(Array.from(input.files||[]));input.value='';};
 for(const id of ['import','add-model','empty-import']) $(id).onclick=()=>folderInput.click();
 $('single-import').onclick=()=>input.click();
+for(const id of ['preloaded-import','empty-preloaded']) $(id).onclick=loadPreloaded;
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view!));
 $('filter').onchange=()=>{applyVisibility();fit();};
 $('panel-toggle').onclick=()=>{$('panel').hidden=!$('panel').hidden;};
@@ -267,8 +280,10 @@ async function runSegmentation(){
         if(generation!==segmentationGeneration||!models.includes(model))return;
         model.pendingResult=result;
       }
-      segmentationMessage=`正在强平滑 · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
-      const refined=await refineSegmentation(positions,result,localResults?model.topology:undefined,segmentationAbort.signal);
+      segmentationMessage=`${model.refinementUrl?'正在读取预载分牙结果':'正在强平滑'} · ${model.jaw==='upper'?'上颌':'下颌'}，请稍候…`;updateSegmentationState();
+      const refined=model.refinementUrl
+        ? await loadPreloadedRefinement(model.refinementUrl,segmentationAbort.signal)
+        : await refineSegmentation(positions,result,localResults?model.topology:undefined,segmentationAbort.signal);
       if(generation!==segmentationGeneration||!models.includes(model)){refined.geometry.dispose();return;}
       model.refined?.dispose();model.refined=refined.geometry;
       model.faceLabels=refined.faceLabels;model.editable=undefined;
@@ -279,7 +294,7 @@ async function runSegmentation(){
   }catch(error){
     if(generation!==segmentationGeneration)return;
     segmentationMessage=error instanceof Error?error.message:String(error);
-    if(segmentationMessage==='Failed to fetch')segmentationMessage='无法连接本地处理服务，请启动本地 Python 服务后重试';
+    if(segmentationMessage==='Failed to fetch')segmentationMessage=models.some(model=>model.refinementUrl)?'预载分牙数据读取失败，请刷新页面后重试':'无法连接本地处理服务，请启动本地 Python 服务后重试';
   }finally{
     if(generation===segmentationGeneration){segmentationRunning=false;updateSegmentationState();}
   }
