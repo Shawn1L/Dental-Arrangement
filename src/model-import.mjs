@@ -12,7 +12,7 @@ export function clearModels(group, models) {
 // Only the latest selection may add meshes or update the loading state.
 export function createModelImporter({ clear, add, onStart, onFinish, onError }) {
   let generation = 0;
-  return async function importFiles(files, companions) {
+  return async function importFiles(files, companions, refinements) {
     if (!files.length) return;
     const current = ++generation;
     clear();
@@ -38,7 +38,7 @@ export function createModelImporter({ clear, add, onStart, onFinish, onError }) 
           result = JSON.parse(await companion.text());
           if (current !== generation) return;
         }
-        add(buffer, file.name, result);
+        add(buffer, file.name, result, refinements?.get(file));
         added++;
       } catch (error) {
         if (current !== generation) return;

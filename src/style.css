@@ -69,3 +69,14 @@
 #lasso-overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:4}
 #edit-confirm{border:1px solid #dfe5ed;border-radius:12px;padding:26px 28px;width:440px;max-width:90vw;color:#44515f;box-shadow:0 16px 70px #182c4933}#edit-confirm::backdrop{background:#16283b55}#edit-confirm h2{font-size:19px;font-weight:550;margin:0 0 18px}#edit-confirm p{font-size:13px;line-height:1.8;color:#8793a0;margin:0 0 26px}#edit-confirm>div{display:flex;gap:12px;justify-content:flex-end}#edit-confirm>div>button{padding:10px 28px;border-radius:5px}#edit-confirm-cancel{border:1px solid #dee4eb}
 @media(max-width:1000px){#adjustment{width:265px;padding:18px}.adjustment-stage #viewport{right:265px}.adjustment-stage .views{left:calc((100% - 265px)/2);gap:0}.adjustment-stage .view{width:40px}#tooth-picker{right:280px;max-width:calc(100% - 300px)}}
+
+.preloaded-button{padding:10px 14px;border:1px solid #c9dced;border-radius:8px;background:#fff;color:#368cde;white-space:nowrap}.preloaded-button:hover{background:#eaf4ff}
+
+/* Preprocessing action follows the reference; import controls sit on the next row. */
+#model-adjustment-actions{position:absolute;right:28px;top:31px}
+#adjust-model{background:#49a0ff;box-shadow:none;padding:7px 16px;font-size:12px}
+#adjust-model:hover{background:#2785e8}
+.top-actions{top:94px}
+#panel{top:147px;max-height:calc(100% - 225px)}
+@media(max-width:1100px){#model-adjustment-actions{right:18px;top:31px}}
+@media(max-width:760px){#model-adjustment-actions{right:16px;top:94px}.top-actions{top:140px}#panel{top:193px;max-height:calc(100% - 271px)}#case-picker{max-width:calc(100% - 145px)}}
