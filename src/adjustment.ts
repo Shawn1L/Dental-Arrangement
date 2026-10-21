@@ -1,9 +1,14 @@
+import { buildBoundaryCurves } from './boundary-curves.mjs';
+import { isControlPointVisible } from './control-point-visibility.mjs';
 import * as THREE from 'three';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createToothAnnotations, toothColor, type ToothAnnotation } from './segmentation.mjs';
 import { createToothLabels } from './tooth-labels';
-import { createEditableJaw, regionCenters, activeRegions, boundaryLoops, controlIndices, boundaryReplacement, moveBoundary, applyLasso, renumber, setMark, deleteRegion, EditSession, type EditableJaw, type BoundaryLoop } from './segmentation-editor.mjs';
+import { createEditableJaw, regionCenters, activeRegions, boundaryLoops, prepareBoundaryControls, controlIndices, boundaryReplacement, moveBoundary, applyLasso, renumber, setMark, deleteRegion, EditSession, type EditableJaw, type BoundaryLoop } from './segmentation-editor.mjs';
 
 export type AdjustmentModel={jaw:string;mesh:THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>;refined?:THREE.BufferGeometry;faceLabels?:Uint16Array;editable?:EditableJaw;teeth?:ToothAnnotation[]};
 type Host={scene:THREE.Scene;canvas:HTMLCanvasElement;controls:OrbitControls;camera:()=>THREE.Camera;models:()=>AdjustmentModel[];toast:(message:string)=>void;clearToast:()=>void;finish:()=>void;fit:()=>void};
@@ -21,18 +26,38 @@ export function createAdjustment(host:Host) {
   let active=false,step=0,tool='boundary',subtract=false,selected=0,dentition='adult',pickerKey=0;
   let session:EditSession|undefined,editModels:AdjustmentModel[]=[],current:AdjustmentModel|undefined;
   const visuals:THREE.Object3D[]=[];let labels:ReturnType<typeof createToothLabels>|undefined;
-  const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();raycaster.firstHitOnly=true;
-  let preview:THREE.Line|undefined;
-  let gesture:{pointer:number;points:number[][];key:number;handle?:Handle;target?:number[];marker?:{mesh:THREE.InstancedMesh;index:number}}|undefined;
+  const raycaster=new THREE.Raycaster(),visibilityRaycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();raycaster.firstHitOnly=visibilityRaycaster.firstHitOnly=true;
+  const boundaryLineWidth=4; // CSS pixels, independent of camera zoom.
+  Object.assign(raycaster.params,{Line2:{threshold:10-boundaryLineWidth}});
+  function boundaryMaterial(color:string){return new LineMaterial({color,linewidth:boundaryLineWidth,worldUnits:false,depthTest:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-4,toneMapped:false});}
+  let preview:LineSegments2|undefined;
+  let hoveredLine:LineSegments2|undefined,hoveredPoint:{mesh:THREE.InstancedMesh;index:number}|undefined;
+  const lime=new THREE.Color('#00FF00');
+  function clearHover(){
+    if(hoveredLine)(hoveredLine.material as LineMaterial).color.set(hoveredLine.userData.key===selected?'#ffffff':'#27c778');
+    if(hoveredLine)hoveredLine.renderOrder=hoveredLine.userData.key===selected?2:1;
+    if(hoveredPoint){const {mesh,index}=hoveredPoint;mesh.setColorAt(index,new THREE.Color(mesh.userData.handles[index].key===selected?'#30be87':'#409dff'));mesh.instanceColor!.needsUpdate=true;}
+    hoveredLine=undefined;hoveredPoint=undefined;host.canvas.style.cursor='';
+  }
+  function selectBoundary(key:number){
+    clearHover();selected=key;
+    for(const layer of visuals)layer.traverse(object=>{
+      if(object instanceof LineSegments2&&object.userData.key){(object.material as LineMaterial).color.set(object.userData.key===selected?'#ffffff':'#27c778');object.renderOrder=object.userData.key===selected?2:1;}
+      if(object instanceof THREE.InstancedMesh&&object.userData.handles){object.userData.choices.forEach((choices:Handle[],i:number)=>{const handle=choices.find(h=>h.key===selected)??choices[0];object.userData.handles[i]=handle;object.setColorAt(i,new THREE.Color(handle.key===selected?'#30be87':'#409dff'));});object.instanceColor!.needsUpdate=true;}
+    });
+    $<HTMLButtonElement>('delete-boundary').disabled=!key;
+  }
+  let gesture:{pointer:number;points:number[][];key:number;dragging?:boolean;handle?:Handle;target?:number[];marker?:{mesh:THREE.InstancedMesh;index:number}}|undefined;
+  let gumClick:{pointer:number;start:number[];moved:boolean}|undefined;
   let confirmAction:(()=>void)|undefined;
-  function confirm(title:string,message:string,action:()=>void){if(gesture)rebuild();$('edit-confirm').querySelector('h2')!.textContent=title;$('edit-confirm').querySelector('p')!.textContent=message;confirmAction=action;dialog.showModal();}
+  function confirm(title:string,message:string,action:()=>void){clearHover();if(gesture)rebuild();$('edit-confirm').querySelector('h2')!.textContent=title;$('edit-confirm').querySelector('p')!.textContent=message;confirmAction=action;dialog.showModal();}
   $('edit-confirm-cancel').onclick=()=>{confirmAction=undefined;dialog.close();};
   $('edit-confirm-continue').onclick=()=>{const action=confirmAction;confirmAction=undefined;dialog.close();action?.();};
   dialog.oncancel=()=>{confirmAction=undefined;};
-  function clearVisuals(){preview=undefined;labels?.dispose();labels=undefined;for(const object of visuals){object.removeFromParent();object.traverse(o=>{const mesh=o as THREE.Mesh;if(o instanceof THREE.InstancedMesh)o.dispose();mesh.geometry?.dispose();if(mesh.material){for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material])m.dispose();}});}visuals.length=0;}
+  function clearVisuals(){clearHover();preview=undefined;labels?.dispose();labels=undefined;for(const object of visuals){object.removeFromParent();object.traverse(o=>{const mesh=o as THREE.Mesh;if(o instanceof THREE.InstancedMesh)o.dispose();mesh.geometry?.dispose();if(mesh.material){for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material])m.dispose();}});}visuals.length=0;}
   const loopsCache=new WeakMap<EditableJaw,Map<number,BoundaryLoop[]>>();
   function loopsFor(jaw:EditableJaw,key:number){let cache=loopsCache.get(jaw);if(!cache){cache=new Map();loopsCache.set(jaw,cache);}let loops=cache.get(key);if(!loops){loops=boundaryLoops(jaw,key);cache.set(key,loops);}return loops;}
-  function cancelGesture(){if(!gesture)return;const id=gesture.pointer;gesture=undefined;if(host.canvas.hasPointerCapture(id))host.canvas.releasePointerCapture(id);overlay.querySelector('polyline')!.setAttribute('points','');}
+  function cancelGesture(){gumClick=undefined;if(!gesture)return;const id=gesture.pointer;gesture=undefined;if(host.canvas.hasPointerCapture(id))host.canvas.releasePointerCapture(id);overlay.querySelector('polyline')!.setAttribute('points','');}
   function updateModel(model:AdjustmentModel,patch?:EditSession['lastChanges'][number]){
     const jaw=model.editable!;model.teeth=createToothAnnotations(regionCenters(jaw));
     const colors=model.refined!.getAttribute('color') as THREE.BufferAttribute,cache=new Map<number,THREE.Color>();
@@ -44,6 +69,19 @@ export function createAdjustment(host:Host) {
   }
   function syncChanges(){for(const patch of session?.lastChanges||[]){const model=editModels[patch.j],cache=loopsCache.get(model.editable!);for(const key of patch.old)cache?.delete(key);for(const key of patch.next)cache?.delete(key);updateModel(model,patch);}}
 
+  const curveCache=new WeakMap<EditableJaw,{loops:BoundaryLoop[];signature:string;segments:Map<number,number[]>}>();
+  function projectCurve(point:number[]){const result={point:new THREE.Vector3(),distance:0,faceIndex:0};(current!.refined!.boundsTree as MeshBVH).closestPointToPoint(new THREE.Vector3().fromArray(point),result);return result.point.toArray();}
+  function curveSegments(jaw:EditableJaw,entries:{key:number;loop:BoundaryLoop}[]){
+    const controls=new Set<number>();for(const {loop} of entries)for(const i of controlIndices(jaw,loop))controls.add(loop.vertices[i]);
+    const loops=entries.map(e=>e.loop),signature=[...controls].sort((a,b)=>a-b).join(','),cached=curveCache.get(jaw);
+    if(cached?.signature===signature&&cached.loops.length===loops.length&&loops.every((loop,i)=>loop===cached.loops[i]))return cached.segments;
+    const segments=new Map<number,number[]>();
+    for(const curve of buildBoundaryCurves(jaw,entries,controls,projectCurve))for(const key of curve.keys){
+      if(!segments.has(key))segments.set(key,[]);const positions=segments.get(key)!;
+      for(let i=1;i<curve.points.length;i++)positions.push(...curve.points[i-1],...curve.points[i]);
+    }
+    curveCache.set(jaw,{loops,signature,segments});return segments;
+  }
   function rebuild(){
     cancelGesture();host.clearToast();clearVisuals();picker.hidden=true;
     if(!active)return;
@@ -51,7 +89,7 @@ export function createAdjustment(host:Host) {
     current=editModels.find(m=>m.jaw===jawName);
     for(const model of editModels){model.mesh.visible=model===current;model.mesh.geometry=model.refined!;model.mesh.material.vertexColors=!numbering&&tool==='lasso';model.mesh.material.color.set(model.mesh.material.vertexColors?0xffffff:0xc7a775);model.mesh.material.opacity=1;model.mesh.material.transparent=false;model.mesh.material.depthWrite=true;model.mesh.material.wireframe=false;model.mesh.material.needsUpdate=true;}
     $('edit-title').textContent=`${numbering?'牙号调整':'分牙调整'}（${jawName==='upper'?'上颌':'下颌'}）`;
-    $('edit-guide').textContent=numbering?'点击牙号气泡修改编号或添加特殊标记。':tool==='boundary'?'Ctrl + 左键选中牙齿，再左键拖动蓝色控制点。':'从牙齿区域按住左键圈选，松开自动闭合；圈选穿透背面。';
+    $('edit-guide').textContent=numbering?'点击牙号气泡修改编号或添加特殊标记。':tool==='boundary'?'悬停龈牙线或控制点亮绿，单击选中，拖动控制点调整；也可 Ctrl + 左键选牙。':'从牙齿区域按住左键圈选，松开自动闭合；圈选穿透背面。';
     $('edit-tools').hidden=numbering;$('boundary-tools').hidden=tool!=='boundary';$('lasso-tools').hidden=tool!=='lasso';
     ui.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
     ui.querySelectorAll<HTMLButtonElement>('[data-lasso]').forEach(b=>b.classList.toggle('active',(b.dataset.lasso==='subtract')===subtract));
@@ -65,21 +103,26 @@ export function createAdjustment(host:Host) {
     const keys=activeRegions(jaw);
     if(!keys.has(selected))selected=0;
     const handles:Handle[]=[];
+    const entries=[...keys].flatMap(key=>loopsFor(jaw,key).map(loop=>({key,loop})));
+    if(numbering||tool==='boundary')prepareBoundaryControls(jaw,entries.map(e=>e.loop));
+    const curves=numbering||tool==='boundary'?curveSegments(jaw,entries):new Map<number,number[]>();
     if(numbering||tool==='boundary')for(const key of keys) {
-      const segments:number[]=[];
+      const segments=curves.get(key)??[];
       for(const loop of loopsFor(jaw,key)) {
-        for(let i=1;i<loop.vertices.length;i++)segments.push(...jaw.vertices[loop.vertices[i-1]],...jaw.vertices[loop.vertices[i]]);
         if(!numbering)for(const index of controlIndices(jaw,loop)) {
           handles.push({key,loop,index});
         }
       }
-      const geometry=new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(segments,3));
-      layer.add(new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({color:key===selected&&!numbering?'#ffffff':'#27c778',depthTest:true})));
+      const geometry=new LineSegmentsGeometry().setPositions(segments);
+      const line=new LineSegments2(geometry,boundaryMaterial(key===selected&&!numbering?'#ffffff':'#27c778'));line.userData.key=key;line.renderOrder=key===selected?2:1;layer.add(line);
     }
     if(handles.length){
-      const points=new THREE.InstancedMesh(new THREE.SphereGeometry(.23,10,8),new THREE.MeshBasicMaterial({depthTest:true,toneMapped:false}),handles.length);
-      const matrix=new THREE.Matrix4();handles.forEach((handle,i)=>{points.setMatrixAt(i,matrix.makeTranslation(...jaw.vertices[handle.loop.vertices[handle.index]] as [number,number,number]));points.setColorAt(i,new THREE.Color(handle.key===selected?'#30be87':'#409dff'));});
-      points.userData.handles=handles;layer.add(points);
+      const byVertex=new Map<number,Handle[]>();
+      for(const handle of handles){const vertex=handle.loop.vertices[handle.index];if(!byVertex.has(vertex))byVertex.set(vertex,[]);byVertex.get(vertex)!.push(handle);}
+      const choices=[...byVertex.values()],primary=choices.map(list=>list.find(h=>h.key===selected)??list[0]);
+      const points=new THREE.InstancedMesh(new THREE.CircleGeometry(.23,24),new THREE.MeshBasicMaterial({depthTest:false,depthWrite:false,transparent:false,toneMapped:false}),primary.length);
+      const matrix=new THREE.Matrix4();primary.forEach((handle,i)=>{points.setMatrixAt(i,matrix.makeTranslation(...jaw.vertices[handle.loop.vertices[handle.index]] as [number,number,number]));points.setColorAt(i,new THREE.Color(handle.key===selected?'#30be87':'#409dff'));});
+      points.renderOrder=10;points.userData.handles=primary;points.userData.choices=choices;points.userData.positions=primary.map(handle=>new THREE.Vector3().fromArray(jaw.vertices[handle.loop.vertices[handle.index]]));layer.add(points);
     }
     if(numbering){labels=createToothLabels(current.teeth!);host.scene.add(labels.group);}
     frame();
@@ -111,29 +154,60 @@ export function createAdjustment(host:Host) {
   function setRay(e:PointerEvent){const [x,y]=localPoint(e),r=host.canvas.getBoundingClientRect();pointer.set(x/r.width*2-1,-y/r.height*2+1);raycaster.setFromCamera(pointer,host.camera());}
   function hitSurface(){current!.mesh.updateWorldMatrix(true,false);return raycaster.intersectObject(current!.mesh)[0];}
   function stop(e:PointerEvent){e.preventDefault();e.stopImmediatePropagation();}
+  function boundaryHit(surface:THREE.Intersection|undefined){
+    // Line2 uses a ten CSS pixel hit diameter, including the visible stroke.
+    const hits=raycaster.intersectObjects(visuals,true).filter(h=>h.instanceId!==undefined?!!h.object.userData.visible?.[h.instanceId]:!surface||h.distance<=surface.distance+.2);
+    const points=hits.filter(h=>h.instanceId!==undefined&&h.object.userData.handles&&h.object.userData.visible?.[h.instanceId]);
+    const point=points.find(h=>h.object.userData.handles[h.instanceId!].key===selected&&h.distance<=points[0].distance+.01)??points[0];
+    return point??hits.find(h=>h.object instanceof LineSegments2&&h.object.userData.key);
+  }
+  function hover(e:PointerEvent){
+    clearHover();if(!active||!current||step%2||tool!=='boundary'||e.buttons||dialog.open)return;
+    setRay(e);frame();const hit=boundaryHit(hitSurface());if(!hit)return;
+    if(hit.instanceId!==undefined){hoveredPoint={mesh:hit.object as THREE.InstancedMesh,index:hit.instanceId};hoveredPoint.mesh.setColorAt(hit.instanceId,lime);hoveredPoint.mesh.instanceColor!.needsUpdate=true;}
+    else {hoveredLine=hit.object as LineSegments2;(hoveredLine.material as LineMaterial).color.copy(lime);hoveredLine.renderOrder=3;}
+    host.canvas.style.cursor='pointer';
+  }
+  host.controls.addEventListener('change',()=>{if(!gesture)clearHover();});
+  host.canvas.addEventListener('pointerleave',clearHover);
   host.canvas.addEventListener('pointerdown',e=>{
-    if(!active||e.button!==0||!current)return;stop(e);setRay(e);frame();
+    if(!active||!current)return;
+    clearHover();gumClick=undefined;if(e.button!==0||e.shiftKey||e.metaKey)return;
+    setRay(e);frame();
     const hit=hitSurface(),jaw=current.editable!;
     if(step%2){
       const bubble=labels&&raycaster.intersectObjects(labels.group.children).find(h=>h.object.userData.region&&(!hit||h.distance<=hit.distance+.01));
-      if(bubble)showPicker(bubble.object.userData.region);else picker.hidden=true;return;
+      if(bubble){stop(e);showPicker(bubble.object.userData.region);}else picker.hidden=true;return;
     }
-    if(e.ctrlKey){selected=hit?.faceIndex!==undefined?jaw.labels[hit.faceIndex!]:0;rebuild();return;}
+    if(e.ctrlKey){stop(e);selected=hit?.faceIndex!==undefined?jaw.labels[hit.faceIndex!]:0;rebuild();return;}
     let handleHit:THREE.Intersection|undefined;
-    if(tool==='boundary')handleHit=raycaster.intersectObjects(visuals,true).find(h=>h.instanceId!==undefined&&h.object.userData.handles?.[h.instanceId]?.key===selected&&(!hit||h.distance<=hit.distance+.2));
-    if(tool==='boundary'&&!handleHit)return;
+    if(tool==='boundary'){
+      const boundary=boundaryHit(hit);if(!boundary){
+        if(selected&&hit?.faceIndex!==undefined&&jaw.labels[hit.faceIndex!]===0)gumClick={pointer:e.pointerId,start:localPoint(e),moved:false};
+        return;
+      }
+      stop(e);
+      if(boundary.instanceId===undefined){selectBoundary(boundary.object.userData.key);hover(e);return;}
+      handleHit=boundary;selectBoundary(boundary.object.userData.handles[boundary.instanceId].key);
+    }else stop(e);
     gesture={pointer:e.pointerId,points:[localPoint(e)],key:hit?.faceIndex!==undefined?jaw.labels[hit.faceIndex!]:0,handle:handleHit?.instanceId!==undefined?handleHit.object.userData.handles[handleHit.instanceId]:undefined,marker:handleHit?.instanceId!==undefined?{mesh:handleHit.object as THREE.InstancedMesh,index:handleHit.instanceId}:undefined};
     host.canvas.setPointerCapture(e.pointerId);
   },{capture:true});
   host.canvas.addEventListener('pointermove',e=>{
-    if(!active||!gesture||e.pointerId!==gesture.pointer)return;stop(e);
+    if(!active)return;
+    if(gumClick&&e.pointerId===gumClick.pointer){const [x,y]=localPoint(e);if(Math.hypot(x-gumClick.start[0],y-gumClick.start[1])>=3)gumClick.moved=true;}
+    if(!gesture){hover(e);return;}if(e.pointerId!==gesture.pointer)return;stop(e);
+    if(gesture.handle&&!gesture.dragging){const [x,y]=localPoint(e),[startX,startY]=gesture.points[0];if(Math.hypot(x-startX,y-startY)<3)return;gesture.dragging=true;}
     if(gesture.handle){setRay(e);const hit=hitSurface();gesture.target=undefined;if(preview)preview.visible=false;
       const original=current!.editable!.vertices[gesture.handle.loop.vertices[gesture.handle.index]];
       const p=hit?current!.mesh.worldToLocal(hit.point.clone()):undefined;
       const path=p&&boundaryReplacement(current!.editable!,gesture.handle.loop,gesture.handle.index,p.toArray());
       const marker=gesture.marker;
-      if(marker){marker.mesh.setMatrixAt(marker.index,new THREE.Matrix4().makeTranslation(...(path?p!.toArray():original) as [number,number,number]));marker.mesh.instanceMatrix.needsUpdate=true;marker.mesh.computeBoundingSphere();}
-      if(path){gesture.target=p!.toArray();if(!preview){preview=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:'#ffffff',depthTest:true}));visuals[0].add(preview);}preview.visible=true;preview.geometry.dispose();preview.geometry=new THREE.BufferGeometry().setFromPoints(path.map(v=>new THREE.Vector3().fromArray(current!.editable!.vertices[v])));}
+      if(marker){marker.mesh.userData.positions[marker.index].fromArray(path?p!.toArray():original);marker.mesh.userData.visibilityDirty=true;marker.mesh.boundingSphere=null;}
+      if(path){gesture.target=p!.toArray();if(!preview){preview=new LineSegments2(new LineSegmentsGeometry(),boundaryMaterial('#ffffff'));preview.renderOrder=4;visuals[0].add(preview);}preview.visible=true;preview.geometry.dispose();const jaw=current!.editable!,anchors=new Set(controlIndices(jaw,gesture.handle.loop).map(i=>gesture!.handle!.loop.vertices[i]).filter(v=>path.includes(v)));
+        const moved=path.reduce((best,v)=>new THREE.Vector3().fromArray(jaw.vertices[v]).distanceToSquared(p!)<new THREE.Vector3().fromArray(jaw.vertices[best]).distanceToSquared(p!)?v:best,path[0]);anchors.add(moved);
+        const coordinates:number[]=[];for(const curve of buildBoundaryCurves(jaw,[{key:gesture.handle.key,loop:{key:gesture.handle.key,vertices:path,closed:true}}],anchors,projectCurve))for(let i=1;i<curve.points.length;i++)coordinates.push(...curve.points[i-1],...curve.points[i]);
+        preview.geometry=new LineSegmentsGeometry().setPositions(coordinates);}
     }
     else {const p=localPoint(e),last=gesture.points.at(-1)!;if(Math.hypot(p[0]-last[0],p[1]-last[1])>=2)gesture.points.push(p);overlay.querySelector('polyline')!.setAttribute('points',[...gesture.points,gesture.points[0]].map(p=>p.join(',')).join(' '));}
   },{capture:true});
@@ -145,11 +219,43 @@ export function createAdjustment(host:Host) {
     const jaw=current!.editable!;
     if(g.handle&&g.target){let changed=false;edit(()=>{changed=moveBoundary(jaw,g.handle!.key,g.handle!.loop,g.handle!.index,g.target!,$<HTMLInputElement>('separate-boundary').checked);});if(!changed)host.toast('此位置无法形成有效边界，请缩短拖动距离后重试');}
     else if(!g.handle){if(!g.key){host.toast('请从牙齿区域开始圈选');return;}const r=host.canvas.getBoundingClientRect(),matrix=current!.mesh.matrixWorld.clone(),camera=host.camera();edit(()=>applyLasso(jaw,g.key,g.points,subtract,p=>{const v=new THREE.Vector3().fromArray(p).applyMatrix4(matrix).project(camera);return [(v.x+1)*r.width/2,(1-v.y)*r.height/2,v.z];}));}
-    else {rebuild();host.toast('此位置无法形成有效边界，请缩短拖动距离后重试');}
+    else {rebuild();if(g.dragging)host.toast('此位置无法形成有效边界，请缩短拖动距离后重试');}
   }
-  host.canvas.addEventListener('pointerup',e=>release(e),{capture:true});host.canvas.addEventListener('pointercancel',e=>release(e,true),{capture:true});
+  host.canvas.addEventListener('pointerup',e=>{
+    const click=gumClick;gumClick=undefined;
+    if(active&&current&&click?.pointer===e.pointerId&&!click.moved&&e.button===0){
+      setRay(e);const hit=hitSurface();
+      if(hit?.faceIndex!==undefined&&current.editable!.labels[hit.faceIndex!]===0&&!boundaryHit(hit))selectBoundary(0);
+    }
+    release(e);hover(e);
+  },{capture:true});host.canvas.addEventListener('pointercancel',e=>{gumClick=undefined;release(e,true);clearHover();},{capture:true});
   window.addEventListener('keydown',e=>{if(!active||dialog.open||e.target instanceof HTMLInputElement)return;if((e.ctrlKey||e.metaKey)&&['z','y'].includes(e.key.toLowerCase())){e.preventDefault();if(gesture)return;if(e.key.toLowerCase()==='y'||e.shiftKey)session?.redo();else session?.undo();syncChanges();rebuild();}});
-  function frame(){if(!active||!current)return;current.mesh.updateWorldMatrix(true,false);for(const visual of visuals)visual.matrix.copy(current.mesh.matrixWorld);labels?.group.matrix.copy(current.mesh.matrixWorld);}
+  function frame(){
+    if(!active||!current)return;
+    current.mesh.updateWorldMatrix(true,false);
+    const camera=host.camera();camera.updateWorldMatrix(true,false);
+    const rotation=current.mesh.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(camera.getWorldQuaternion(new THREE.Quaternion()));
+    const matrix=new THREE.Matrix4(),world=new THREE.Vector3(),scale=new THREE.Vector3(1,1,1),hiddenScale=new THREE.Vector3();
+    const viewProjection=new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+    for(const visual of visuals){
+      visual.matrix.copy(current.mesh.matrixWorld);
+      visual.traverse(object=>{
+        if(!(object instanceof THREE.InstancedMesh)||!object.userData.positions)return;
+        const data=object.userData;
+        const changed=data.visibilityDirty||!data.visibilityCamera?.equals(viewProjection)||!data.visibilityModel?.equals(current!.mesh.matrixWorld);
+        if(changed){
+          data.visible=data.positions.map((anchor:THREE.Vector3)=>isControlPointVisible(visibilityRaycaster,current!.mesh,camera,world.copy(anchor).applyMatrix4(current!.mesh.matrixWorld)));
+          data.visibilityCamera=viewProjection.clone();data.visibilityModel=current!.mesh.matrixWorld.clone();data.visibilityDirty=false;
+        }
+        // A visible surface anchor gets a complete circle; hidden anchors get
+        // no marker and cannot be picked. Marker geometry never clips into teeth.
+        data.positions.forEach((anchor:THREE.Vector3,i:number)=>object.setMatrixAt(i,matrix.compose(anchor,rotation,data.visible[i]?scale:hiddenScale)));
+        object.instanceMatrix.needsUpdate=true;object.computeBoundingSphere();
+      });
+      visual.updateWorldMatrix(true,true);
+    }
+    labels?.group.matrix.copy(current.mesh.matrixWorld);
+  }
   return {get active(){return active;},frame,
     guard(action:()=>void){if(!active){action();return;}confirm('退出编辑模式','退出后所有分牙操作将不被保留，请确认是否继续？',()=>{cancel();action();});},
     enter(){
@@ -157,7 +263,7 @@ export function createAdjustment(host:Host) {
       if(!['upper','lower'].every(j=>editModels.some(m=>m.jaw===j))){host.toast('调整分牙需要完整的上颌和下颌分牙结果');return;}
       for(const model of editModels)if(!model.editable)model.editable=createEditableJaw(model.refined!.getAttribute('position').array as Float32Array,model.faceLabels!);
       session=new EditSession(editModels.map(m=>m.editable!));active=true;step=0;selected=0;tool='boundary';subtract=false;dentition='adult';$<HTMLInputElement>('separate-boundary').checked=false;
-      document.body.classList.add('adjustment-stage');ui.hidden=false;host.controls.mouseButtons={LEFT:undefined,MIDDLE:THREE.MOUSE.PAN,RIGHT:THREE.MOUSE.ROTATE};
+      document.body.classList.add('adjustment-stage');ui.hidden=false;host.controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.PAN};
       for(const model of editModels){const geometry=model.refined!;if(!geometry.boundsTree)geometry.boundsTree=new MeshBVH(geometry,{indirect:true});model.mesh.raycast=acceleratedRaycast;loopsCache.delete(model.editable!);updateModel(model);}
       rebuild();host.fit();
     }

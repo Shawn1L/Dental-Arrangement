@@ -57,7 +57,7 @@ test('surface drag updates ownership, linked boundary and area without moving me
   for(const key of [1,2])assert.ok(boundaryLoops(jaw,key).every(l=>l.closed));
 });
 test('separating shared boundary creates lasting gum gap without changing neighbor',()=>{
-  const jaw=grid(),before=jaw.labels.slice();assert.equal(shrinkShared(jaw,true),true);
+  const jaw=grid(),before=jaw.labels.slice(),neighborControls=()=>boundaryLoops(jaw,2).flatMap(loop=>controlIndices(jaw,loop).map(i=>loop.vertices[i]));const anchors=neighborControls();assert.equal(shrinkShared(jaw,true),true);assert.deepEqual(neighborControls(),anchors,'separation preserves neighbor control positions');
   before.forEach((id,f)=>{if(id===2)assert.equal(jaw.labels[f],2);});
   assert.ok(jaw.labels.some((id,f)=>id===0&&before[f]===1));
 });
@@ -84,4 +84,56 @@ test('history reports only affected jaws and face identities for incremental ren
   assert.equal(session.edit(()=>{}),false);assert.deepEqual(session.lastChanges,[]);
   session.edit(()=>renumber(upper,1,12));assert.equal(session.lastChanges[0].j,0);assert.equal(session.lastChanges[0].indices.length,0);
   assert.equal(session.lastChanges[0].before[1].number,11);assert.equal(session.lastChanges[0].after[1].number,12);
+});
+
+
+test('boundary handle counts grow with arc length and stay between 20 and 25',()=>{
+  const counts=[];
+  for(const radius of [5,8,12]){
+    const positions=[],labels=[];
+    for(let i=0;i<120;i++){
+      const a=i*Math.PI/60,b=(i+1)*Math.PI/60;
+      positions.push(0,0,0,radius*Math.cos(a),radius*Math.sin(a),0,radius*Math.cos(b),radius*Math.sin(b),0);labels.push(11);
+    }
+    // Reuse exactly the same Float32 endpoint at the circular seam.
+    positions.splice(positions.length-3,3,...positions.slice(3,6));
+    const jaw=createEditableJaw(new Float32Array(positions),new Uint16Array(labels)),loop=boundaryLoops(jaw,1)[0];
+    const indices=controlIndices(jaw,loop);counts.push(indices.length);
+    assert.ok(indices.length>=20&&indices.length<=25);
+    assert.equal(new Set(indices.map(i=>loop.vertices[i])).size,indices.length);
+  }
+  assert.ok(counts[0]<counts[1]&&counts[1]<counts[2]);
+});
+
+test('adjacent loops share exactly the same control vertices regardless of traversal direction',()=>{
+  const jaw=grid(),a=boundaryLoops(jaw,1)[0],b=boundaryLoops(jaw,2)[0];
+  const shared=new Set(a.vertices.filter(v=>b.vertices.includes(v)));
+  const controls=loop=>controlIndices(jaw,loop).map(i=>loop.vertices[i]);
+  const left=controls(a).filter(v=>shared.has(v)).sort((a,b)=>a-b),right=controls(b).filter(v=>shared.has(v)).sort((a,b)=>a-b);
+  assert.ok(left.length>=2);assert.deepEqual(left,right);
+  const reversed={key:b.key,vertices:[...b.vertices].reverse(),closed:true};
+  assert.deepEqual(controls(reversed).sort((a,b)=>a-b),controls(b).sort((a,b)=>a-b));
+});
+
+test('control sampling follows boundary edits, undo, redo and reset',()=>{
+  const jaw=grid(),session=new EditSession([jaw]);
+  const controls=()=>[1,2].map(key=>boundaryLoops(jaw,key).map(loop=>controlIndices(jaw,loop).map(i=>loop.vertices[i])));
+  const initial=controls();session.edit(()=>shrinkShared(jaw,false));const moved=controls();assert.notDeepEqual(moved,initial);
+  session.undo();assert.deepEqual(controls(),initial);session.redo();assert.deepEqual(controls(),moved);session.reset();assert.deepEqual(controls(),initial);
+});
+
+
+test('extending a dragged boundary reuses existing control points without adding handles',()=>{
+  const jaw=grid(),session=new EditSession([jaw]);
+  const counts=()=>[1,2].map(key=>new Set(boundaryLoops(jaw,key).flatMap(loop=>controlIndices(jaw,loop).map(i=>loop.vertices[i]))).size);
+  const loops=boundaryLoops(jaw,1),loop=loops[0],indices=controlIndices(jaw,loop),index=indices.find(i=>jaw.vertices[loop.vertices[i]].join(',')==='8,6,0');
+  const initial=counts(),length=l=>l.vertices.slice(1).reduce((sum,v,i)=>sum+Math.hypot(...jaw.vertices[v].map((x,j)=>x-jaw.vertices[l.vertices[i]][j])),0);
+  const oldLength=length(loop);assert.notEqual(index,undefined);
+  assert.equal(session.edit(()=>moveBoundary(jaw,1,loop,index,[9,6,0])),true);
+  assert.ok(length(boundaryLoops(jaw,1)[0])>oldLength,'the curve became longer');
+  const moved=counts();moved.forEach((n,i)=>assert.ok(n<=initial[i],'drag does not add handles on either tooth'));
+  const a=boundaryLoops(jaw,1)[0],b=boundaryLoops(jaw,2)[0],shared=new Set(a.vertices.filter(v=>b.vertices.includes(v)));
+  const common=l=>controlIndices(jaw,l).map(i=>l.vertices[i]).filter(v=>shared.has(v)).sort((a,b)=>a-b);
+  assert.deepEqual(common(a),common(b),'shared handles remain aligned after extension');
+  session.undo();assert.deepEqual(counts(),initial);session.redo();assert.deepEqual(counts(),moved);
 });

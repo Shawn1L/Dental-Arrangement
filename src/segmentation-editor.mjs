@@ -50,7 +50,7 @@ export function setMark(jaw,key,mark) {
   if(mark==='S')region.number=null;
   else region.mark=region.mark===mark?null:mark;
 }
-export function deleteRegion(jaw,key) { jaw.labels.forEach((id,f)=>{if(id===key)jaw.labels[f]=0;}); }
+export function deleteRegion(jaw,key) { jaw.labels.forEach((id,f)=>{if(id===key)jaw.labels[f]=0;});invalidateControls(jaw); }
 export function insidePolygon(x,y,polygon) {
   let inside=false;
   for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
@@ -71,6 +71,7 @@ export function applyLasso(jaw,key,polygon,subtract,project) {
       const next=subtract?0:key;if(next!==jaw.labels[f]){jaw.labels[f]=next;changed=true;}
     }
   }
+  if(changed)invalidateControls(jaw);
   return changed;
 }
 export function boundaryLoops(jaw,key) {
@@ -90,24 +91,122 @@ export function boundaryLoops(jaw,key) {
       if(next===undefined)break;
       unused.delete(edgeKey(current,next));path.push(next);current=next;
     }
-    if(path.length>2)loops.push({vertices:path,closed:current===start});
+    if(path.length>2)loops.push({key,vertices:path,closed:current===start});
   }
   return loops;
 }
-export function controlIndices(jaw,loop,spacing=1) {
-  const path=loop.vertices, result=[0];let distance=0;
-  for(let i=1;i<path.length-1;i++) {
-    distance+=Math.hypot(...jaw.vertices[path[i]].map((x,j)=>x-jaw.vertices[path[i-1]][j]));
-    if(distance>=spacing){result.push(i);distance=0;}
+// Sample the whole boundary network together. A selected welded vertex is a
+// handle for every loop passing through it, including both sides of a contact.
+const controlLayouts=new WeakMap();
+function invalidateControls(jaw){controlLayouts.delete(jaw);}
+export function prepareBoundaryControls(jaw,loops) {
+  if(controlLayouts.has(jaw))return;
+  loops??=[...activeRegions(jaw)].flatMap(key=>boundaryLoops(jaw,key));
+  const owners=new Map();
+  const records=loops.map(loop=>{
+    const vertices=loop.closed?loop.vertices.slice(0,-1):loop.vertices.slice(),distances=[0];
+    for(let i=1;i<vertices.length;i++)distances.push(distances[i-1]+Math.hypot(...jaw.vertices[vertices[i]].map((x,j)=>x-jaw.vertices[vertices[i-1]][j])));
+    const length=(distances.at(-1)||0)+(loop.closed?Math.hypot(...jaw.vertices[vertices[0]].map((x,j)=>x-jaw.vertices[vertices.at(-1)][j])):0);
+    const unique=new Set(vertices).size;
+    const record={vertices,distances,length,closed:loop.closed,count:0,minimum:Math.min(20,unique),target:Math.min(unique,Math.max(20,Math.min(25,Math.round(length/3)+5))),limit:Math.min(25,unique)};
+    for(const v of new Set(vertices)){if(!owners.has(v))owners.set(v,[]);owners.get(v).push(record);}
+    return record;
+  });
+  const selected=new Set();
+  while(true){
+    let best=-1,bestScore=-1;
+    for(const r of records){
+      if(r.count>=r.target)continue;
+      const chosen=r.vertices.flatMap((v,i)=>selected.has(v)?[r.distances[i]]:[]);
+      let next=0;
+      for(let i=0;i<r.vertices.length;i++){
+        const v=r.vertices[i],d=r.distances[i];
+        while(next<chosen.length&&chosen[next]<d)next++;
+        if(selected.has(v)||owners.get(v).some(owner=>owner.count>=owner.limit))continue;
+        const left=next?chosen[next-1]:r.closed?chosen.at(-1)-r.length:-Infinity;
+        const right=next<chosen.length?chosen[next]:r.closed?chosen[0]+r.length:Infinity;
+        const score=chosen.length?Math.min(d-left,right-d)/(r.length/r.target||1):Infinity;
+        if(score>bestScore||(score===bestScore&&(best<0||v<best))){best=v;bestScore=score;}
+      }
+    }
+    if(best<0)break;
+    selected.add(best);for(const owner of owners.get(best))owner.count++;
   }
-  // Even tiny regions need three distinct editing handles.
-  if(result.length<3&&path.length>=4)return [...new Set([0,Math.floor((path.length-1)/3),Math.floor((path.length-1)*2/3)])];
-  return result;
+  // A tiny contact loop may share every candidate with a loop already at its
+  // cap. Trade a redundant handle on that neighbor for the missing shared one.
+  for(const r of records)while(r.count<r.minimum){
+    let repaired=false;
+    for(const v of r.vertices){
+      if(selected.has(v))continue;
+      const removals=new Set(),counts=new Map(records.map(owner=>[owner,owner.count]));
+      let possible=true;
+      for(const owner of owners.get(v))if(counts.get(owner)>=owner.limit){
+        const removable=owner.vertices.find(u=>selected.has(u)&&!removals.has(u)&&!owners.get(u).includes(r)&&owners.get(u).every(other=>counts.get(other)>other.minimum));
+        if(removable===undefined){possible=false;break;}
+        removals.add(removable);for(const other of owners.get(removable))counts.set(other,counts.get(other)-1);
+      }
+      if(!possible)continue;
+      for(const u of removals){selected.delete(u);for(const owner of owners.get(u))owner.count--;}
+      selected.add(v);for(const owner of owners.get(v))owner.count++;
+      repaired=true;break;
+    }
+    if(!repaired)break;
+  }
+  const regions=new Map();
+  for(const loop of loops){if(!regions.has(loop.key))regions.set(loop.key,new Set());for(const v of loop.vertices)if(selected.has(v))regions.get(loop.key).add(v);}
+  controlLayouts.set(jaw,{selected,regions});
+}
+export function controlIndices(jaw,loop) {
+  prepareBoundaryControls(jaw);
+  const layout=controlLayouts.get(jaw),selected=layout.regions.get(loop.key)??layout.selected,count=loop.vertices.length-(loop.closed?1:0);
+  const seen=new Set();
+  return loop.vertices.slice(0,count).flatMap((v,i)=>{if(!selected.has(v)||seen.has(v))return [];seen.add(v);return [i];});
+}
+function snapshotControls(jaw){const layout=controlLayouts.get(jaw);return layout?[...layout.regions].map(([key,vertices])=>[key,[...vertices]]):undefined;}
+function restoreControls(jaw,snapshot){
+  if(!snapshot){invalidateControls(jaw);return;}
+  const regions=new Map(snapshot.map(([key,vertices])=>[key,new Set(vertices)]));
+  controlLayouts.set(jaw,{regions,selected:new Set([...regions.values()].flatMap(vertices=>[...vertices]))});
+}
+function moveControls(jaw,key,vertex,target,separate,before){
+  const affected=new Set();jaw.labels.forEach((owner,f)=>{if(owner!==before[f]){affected.add(owner);affected.add(before[f]);}});
+  const old=controlLayouts.get(jaw),boundaries=new Map(),groups=new Map(),regions=new Map();
+  for(const [owner,controls] of old.regions){
+    regions.set(owner,new Set());
+    for(const v of controls){if(!groups.has(v))groups.set(v,[]);groups.get(v).push(owner);}
+  }
+  const nearest=(candidates,p)=>{let best=-1,distance=Infinity;for(const v of candidates){const d=jaw.vertices[v].reduce((sum,x,j)=>sum+(x-p[j])**2,0);if(d<distance||(d===distance&&v<best)){distance=d;best=v;}}return best;};
+  for(const [v,owners] of groups){
+    if(!owners.some(owner=>affected.has(owner))){for(const owner of owners)regions.get(owner).add(v);continue;}
+    for(const owner of owners)if(!boundaries.has(owner))boundaries.set(owner,new Set(boundaryLoops(jaw,owner).flatMap(loop=>loop.vertices)));
+    // Keep unchanged anchors exactly where they were. Moving a shared point
+    // together uses the intersection of its owners' actual new boundaries.
+    const common=[...boundaries.get(owners[0])].filter(candidate=>owners.every(owner=>boundaries.get(owner).has(candidate)));
+    const moving=v===vertex;
+    const joint=common.length&&!separate?nearest(common,moving?target:jaw.vertices[v]):-1;
+    for(const owner of owners){
+      const boundary=boundaries.get(owner),p=moving&&(owner===key||!separate)?target:jaw.vertices[v];
+      const next=joint>=0?joint:(!moving||separate&&owner!==key)&&boundary.has(v)?v:nearest(boundary,p);
+      if(next>=0)regions.get(owner).add(next);
+    }
+  }
+  controlLayouts.set(jaw,{regions,selected:new Set([...regions.values()].flatMap(vertices=>[...vertices]))});
 }
 // A* on surface edges produces a boundary that remains on the original mesh.
-function surfacePath(jaw,start,end,forbidden) {
+function surfacePath(jaw,start,end,forbidden,guide) {
   if(start===end)return [start];
   const distance=(a,b)=>Math.hypot(...jaw.vertices[a].map((x,j)=>x-jaw.vertices[b][j]));
+  const penalties=new Map();
+  const penalty=v=>{
+    if(!guide)return 1;if(penalties.has(v))return penalties.get(v);
+    const p=jaw.vertices[v];let best=Infinity;
+    for(let i=1;i<guide.length;i++){
+      const a=guide[i-1],b=guide[i],d=b.map((x,j)=>x-a[j]),length=d.reduce((sum,x)=>sum+x*x,0);
+      const t=length?Math.max(0,Math.min(1,p.reduce((sum,x,j)=>sum+(x-a[j])*d[j],0)/length)):0;
+      best=Math.min(best,p.reduce((sum,x,j)=>sum+(x-a[j]-d[j]*t)**2,0));
+    }
+    const width=Math.max(.25,distance(start,end)*.15),value=1+6*best/(width*width);penalties.set(v,value);return value;
+  };
   const heap=[], costs=new Map([[start,0]]), parents=new Map();
   function push(item){heap.push(item);let i=heap.length-1;while(i){const p=(i-1)>>1;if(heap[p][0]<=item[0])break;heap[i]=heap[p];i=p;}heap[i]=item;}
   function pop(){const top=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1][0]<heap[c][0])c++;if(heap[c][0]>=last[0])break;heap[i]=heap[c];i=c;}heap[i]=last;}return top;}
@@ -117,7 +216,7 @@ function surfacePath(jaw,start,end,forbidden) {
     if(v===end){const path=[v];while(path[0]!==start)path.unshift(parents.get(path[0]));return path;}
     for(const n of jaw.neighbors[v]) {
       if(n!==end&&forbidden.has(n))continue;
-      const c=cost+distance(v,n);if(c>=(costs.get(n)??Infinity))continue;
+      const c=cost+distance(v,n)*(penalty(v)+penalty(n))/2;if(c>=(costs.get(n)??Infinity))continue;
       costs.set(n,c);parents.set(n,v);push([c+distance(n,end),n,c]);
     }
   }
@@ -134,8 +233,13 @@ export function boundaryReplacement(jaw,loop,index,target) {
   let vertex=-1,best=Infinity;
   jaw.vertices.forEach((p,i)=>{if(forbidden.has(i))return;const d=p.reduce((s,x,j)=>s+(x-target[j])**2,0);if(d<best){best=d;vertex=i;}});
   if(vertex===old[index]||vertex<0)return false;
-  const a=surfacePath(jaw,old[previous],vertex,forbidden);if(!a)return false;
-  const b=surfacePath(jaw,vertex,old[next],new Set([...forbidden,...a.slice(0,-1)]));if(!b)return false;
+  // Give edge routing a smooth corridor with a common tangent at the moved
+  // point, rather than independently finding two arbitrary mesh-edge shortcuts.
+  const before=jaw.vertices[old[handles[(h+handles.length-2)%handles.length]]],after=jaw.vertices[old[handles[(h+2)%handles.length]]];
+  const guide=(a,b,c,d)=>Array.from({length:25},(_,i)=>{const t=i/24;return b.map((x,j)=>.5*((2*x)+(-a[j]+c[j])*t+(2*a[j]-5*x+4*c[j]-d[j])*t*t+(-a[j]+3*x-3*c[j]+d[j])*t*t*t));});
+  const moved=jaw.vertices[vertex],prev=jaw.vertices[old[previous]],following=jaw.vertices[old[next]];
+  const a=surfacePath(jaw,old[previous],vertex,forbidden,guide(before,prev,moved,following));if(!a)return false;
+  const b=surfacePath(jaw,vertex,old[next],new Set([...forbidden,...a.slice(0,-1)]),guide(prev,moved,following,after));if(!b)return false;
   const replacement=[...a,...b.slice(1),...remaining.slice(1)];
   if(new Set(replacement.slice(0,-1)).size!==replacement.length-1)return false;
   return replacement;
@@ -181,26 +285,28 @@ export function moveBoundary(jaw,key,loop,index,target,separate=false) {
     const seen=new Set(queue);
     for(let i=0;i<queue.length;i++)for(const n of jaw.faceNeighbors[queue[i]])if(freed.has(n.face)&&!seen.has(n.face)){seen.add(n.face);jaw.labels[n.face]=jaw.labels[queue[i]];queue.push(n.face);}
   }
-  return jaw.labels.some((id,f)=>id!==before[f]);
+  const changed=jaw.labels.some((id,f)=>id!==before[f]);if(changed)moveControls(jaw,key,loop.vertices[index],target,separate,before);return changed;
 }
 const cloneRegions=regions=>JSON.parse(JSON.stringify(regions));
 export class EditSession {
-  constructor(jaws){this.jaws=jaws;this.baseline=this.snapshot();this.undoStack=[];this.redoStack=[];this.lastChanges=[];}
+  constructor(jaws){this.jaws=jaws;this.baseline=this.snapshot();this.baselineControls=jaws.map(snapshotControls);this.undoStack=[];this.redoStack=[];this.lastChanges=[];}
   snapshot(){return this.jaws.map(jaw=>({labels:jaw.labels.slice(),regions:cloneRegions(jaw.regions)}));}
   edit(action){
-    const before=this.snapshot();action();const patches=[];
+    const before=this.snapshot(),layouts=this.jaws.map(jaw=>controlLayouts.get(jaw)),controls=this.jaws.map(snapshotControls);action();const patches=[];
     this.jaws.forEach((jaw,j)=>{
       const indices=[],old=[],next=[];
       jaw.labels.forEach((id,f)=>{if(id!==before[j].labels[f]){indices.push(f);old.push(before[j].labels[f]);next.push(id);}});
       const regions=cloneRegions(jaw.regions);
-      if(indices.length||JSON.stringify(regions)!==JSON.stringify(before[j].regions))patches.push({j,indices:new Uint32Array(indices),old:new Uint32Array(old),next:new Uint32Array(next),before:before[j].regions,after:regions});
+      if(indices.length&&controlLayouts.get(jaw)===layouts[j])invalidateControls(jaw);
+      if(this.baselineControls[j]===undefined&&controls[j]&&this.undoStack.length===0)this.baselineControls[j]=controls[j];
+      if(indices.length||JSON.stringify(regions)!==JSON.stringify(before[j].regions))patches.push({j,indices:new Uint32Array(indices),old:new Uint32Array(old),next:new Uint32Array(next),before:before[j].regions,after:regions,controlsBefore:controls[j],controlsAfter:snapshotControls(jaw)});
     });
     this.lastChanges=patches;
     if(!patches.length)return false;
     this.undoStack.push(patches);this.redoStack=[];return true;
   }
-  apply(patches,forward){this.lastChanges=patches;for(const p of patches){const jaw=this.jaws[p.j];p.indices.forEach((f,i)=>{jaw.labels[f]=(forward?p.next:p.old)[i];});jaw.regions=cloneRegions(forward?p.after:p.before);}}
+  apply(patches,forward){this.lastChanges=patches;for(const p of patches){const jaw=this.jaws[p.j];p.indices.forEach((f,i)=>{jaw.labels[f]=(forward?p.next:p.old)[i];});jaw.regions=cloneRegions(forward?p.after:p.before);if(p.indices.length)restoreControls(jaw,forward?p.controlsAfter:p.controlsBefore);}}
   undo(){this.lastChanges=[];const p=this.undoStack.pop();if(p){this.apply(p,false);this.redoStack.push(p);}}
   redo(){this.lastChanges=[];const p=this.redoStack.pop();if(p){this.apply(p,true);this.undoStack.push(p);}}
-  reset(){this.lastChanges=[];this.jaws.forEach((jaw,j)=>{jaw.labels.set(this.baseline[j].labels);jaw.regions=cloneRegions(this.baseline[j].regions);});this.undoStack=[];this.redoStack=[];}
+  reset(){this.lastChanges=[];this.jaws.forEach((jaw,j)=>{jaw.labels.set(this.baseline[j].labels);restoreControls(jaw,this.baselineControls[j]);jaw.regions=cloneRegions(this.baseline[j].regions);});this.undoStack=[];this.redoStack=[];}
 }

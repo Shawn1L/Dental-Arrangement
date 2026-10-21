@@ -26,7 +26,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <nav class="feature-bar" aria-label="预处理功能"><button data-feature="网格" aria-pressed="false" title="开启网格并切换正交投影">${svg('<rect x="6" y="6" width="20" height="20" rx="1"/><path d="M6 13h20M6 20h20M13 6v20M20 6v20"/>')}<span>网格</span></button><button data-feature="咬合碰撞">${svg(bite)}<span>咬合碰撞</span></button></nav>
   <section id="workspace" aria-label="模型预处理">
   <main id="viewport" aria-label="牙模三维查看器"></main>
-  <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>查看时，请用鼠标左右键旋转模型，用中键平移模型</li></ul></div>
+  <div id="segmentation-hints" hidden><ul><li>模拟方案，实际治疗效果可能不同</li><li>左键旋转视角，中键拖动或滚轮缩放，右键拖动平移牙模</li></ul></div>
   <div id="model-adjustment-actions"><button id="adjust-model" class="primary">调整模型</button></div>
   <div id="segmentation-actions" hidden><button id="adjust-segmentation" class="primary">调整分牙</button></div>
   <div id="segmentation-state" role="status" hidden></div>
@@ -34,7 +34,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="case-picker" hidden><label>病例 <select id="case-select" aria-label="选择病例"></select></label></div><div class="top-actions"><button id="preloaded-import" class="preloaded-button">预载数据</button><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择数据文件夹">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择数据文件夹</span></button></div>
   <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择数据文件夹</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="auto">牙弓自动定向</option><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div><p id="orientation-status" class="orientation-status" role="status">加载模型后自动识别牙弓方向</p><div class="orientation-actions"><button id="auto-orient">重新自动定向</button><button id="calibrate-front">将当前视角设为正面</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 读取文件夹中的已有分牙结果</p></aside>
   <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>加载牙模数据</h1><p>选择包含上下颌模型和分牙 JSON 的整个文件夹<br/>自动读取已有分牙结果，支持多个病例切换</p><button id="empty-preloaded" class="primary">加载预载数据 · 12 组案例</button><button id="empty-import" class="add-model">选择数据文件夹</button><button id="single-import" class="add-model">单独上传 STL / OBJ</button><small>支持 OBJ / STL + 同名 JSON · 单模型最大 150 MB</small></section>
-  <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待选择数据文件夹</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>滚轮缩放</div><span class="view-info"><span id="projection-label">透视投影</span><span id="dimensions">模型坐标单位</span></span></footer>
+  <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待选择数据文件夹</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>中键 / 滚轮缩放</div><span class="view-info"><span id="projection-label">透视投影</span><span id="dimensions">模型坐标单位</span></span></footer>
   <div class="bottom-tools"><button id="fit" class="icon-button" title="适应窗口（F）" aria-label="适应窗口">${svg('<path d="M12 6H6v6m14-6h6v6M6 20v6h6m14-6v6h-6"/>')}</button><button id="reset" class="icon-button" title="恢复初始视图" aria-label="恢复初始视图">${svg('<path d="M7 13a10 10 0 1 1 1 12M7 5v8h8"/>')}</button><span class="divider"></span><button id="screenshot" class="icon-button" title="导出 PNG 截图" aria-label="导出 PNG 截图">${svg('<path d="M4 10h7l2-4h6l2 4h7v16H4z"/><circle cx="16" cy="18" r="5"/>')}</button></div>
   </section>
   <section id="development" hidden aria-label="开发中"><div class="development-content"><span class="development-icon">${svg('<path d="M8 11 3 16l5 5m16-10 5 5-5 5M19 7l-6 18"/>')}</span><span class="development-badge">开发中</span><h1 id="development-title"></h1><p>该功能还在开发中</p><button id="back-preprocessing" class="primary">返回模型预处理</button></div></section>
@@ -86,7 +86,7 @@ function selectStep(name: string, feature?: string) {
   updateSegmentationState();
   $('development-title').textContent = feature || name;
   controls.enabled = viewer;
-  controls.mouseButtons = segmentationActive ? { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE } : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
   if(viewer){resize();if(pendingFit)fit();}
   document.querySelectorAll<HTMLButtonElement>('[data-step]').forEach(button=>{
     const selected=button.dataset.step===name;
