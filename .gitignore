@@ -5,6 +5,7 @@ dist/
 test-results/
 __pycache__/
 .venv/
+.venv-linux/
 .env.local
 .env.*.local
 

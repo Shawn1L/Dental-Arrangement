@@ -80,3 +80,5 @@
 #panel{top:147px;max-height:calc(100% - 225px)}
 @media(max-width:1100px){#model-adjustment-actions{right:18px;top:31px}}
 @media(max-width:760px){#model-adjustment-actions{right:16px;top:94px}.top-actions{top:140px}#panel{top:193px;max-height:calc(100% - 271px)}#case-picker{max-width:calc(100% - 145px)}}
+.orientation-status{font-size:11px;color:#7f8d9a;line-height:1.6;margin:12px 0}
+.orientation-actions{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}.orientation-actions button{border:1px solid #c9dced;border-radius:5px;padding:7px 8px;font-size:11px;color:#368cde}.orientation-actions button:hover{background:#eaf4ff}

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { inferJaw } from './stl.mjs';
+import { estimateArchFrame } from './arch-orientation.mjs';
 import { parseModelGeometry } from './model-loader.mjs';
 import { clearModels, createModelImporter } from './model-import.mjs';
 import { discoverCases, type LocalCase } from './folder-import.mjs';
@@ -31,7 +32,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div id="segmentation-state" role="status" hidden></div>
   <nav class="views" aria-label="标准视角">${views.map(([id,label,icon]) => `<button class="view ${id==='front'?'active':''}" data-view="${id}" aria-pressed="${id==='front'}" title="${label}">${svg(icon)}<span>${label}</span></button>`).join('')}<span class="divider"></span><label class="jaw-select">${svg(bite)}<select id="filter" aria-label="显示颌面"><option value="all">全颌</option><option value="upper">上颌</option><option value="lower">下颌</option></select></label></nav>
   <div id="case-picker" hidden><label>病例 <select id="case-select" aria-label="选择病例"></select></label></div><div class="top-actions"><button id="preloaded-import" class="preloaded-button">预载数据</button><button id="panel-toggle" class="icon-button" title="显示或隐藏模型面板" aria-label="显示或隐藏模型面板">${svg('<path d="M6 7h20v18H6zM19 7v18"/>')}</button><button id="import" class="primary" aria-label="选择数据文件夹">${svg('<path d="M16 21V5m-5 5 5-5 5 5M6 20v7h20v-7"/>')}<span>选择数据文件夹</span></button></div>
-  <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择数据文件夹</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 读取文件夹中的已有分牙结果</p></aside>
+  <aside id="panel" hidden><div class="panel-title"><span>模型图层</span><span id="model-count">0 个模型</span></div><div id="models"></div><button id="add-model" class="add-model">＋ 选择数据文件夹</button><div class="settings"><label>表面显示<select id="surface"><option value="smooth">平滑</option><option value="flat">原始面片</option><option value="wire">线框</option></select></label><label>透明度 <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" aria-label="模型透明度"/></label><label>模型朝向<select id="orientation"><option value="auto">牙弓自动定向</option><option value="z">Z 轴向上（牙模）</option><option value="y">Y 轴向上</option></select></label><div class="rotate-actions"><button data-rotate="x">X 轴 +90°</button><button data-rotate="y">Y 轴 +90°</button><button data-rotate="z">Z 轴 +90°</button></div><p id="orientation-status" class="orientation-status" role="status">加载模型后自动识别牙弓方向</p><div class="orientation-actions"><button id="auto-orient">重新自动定向</button><button id="calibrate-front">将当前视角设为正面</button></div></div><p class="privacy">${svg('<rect x="8" y="14" width="16" height="13" rx="3"/><path d="M11 14V9a5 5 0 0 1 10 0v5"/>')} 读取文件夹中的已有分牙结果</p></aside>
   <section id="empty"><span class="empty-icon">${svg(arch)}</span><h1>加载牙模数据</h1><p>选择包含上下颌模型和分牙 JSON 的整个文件夹<br/>自动读取已有分牙结果，支持多个病例切换</p><button id="empty-preloaded" class="primary">加载预载数据 · 12 组案例</button><button id="empty-import" class="add-model">选择数据文件夹</button><button id="single-import" class="add-model">单独上传 STL / OBJ</button><small>支持 OBJ / STL + 同名 JSON · 单模型最大 150 MB</small></section>
   <footer><div class="status"><span class="status-dot"></span><span id="status" role="status">等待选择数据文件夹</span></div><div class="gestures">左键旋转<span>·</span>右键平移<span>·</span>中键 / 滚轮缩放</div><span class="view-info"><span id="projection-label">透视投影</span><span id="dimensions">模型坐标单位</span></span></footer>
   <div class="bottom-tools"><button id="fit" class="icon-button" title="适应窗口（F）" aria-label="适应窗口">${svg('<path d="M12 6H6v6m14-6h6v6M6 20v6h6m14-6v6h-6"/>')}</button><button id="reset" class="icon-button" title="恢复初始视图" aria-label="恢复初始视图">${svg('<path d="M7 13a10 10 0 1 1 1 12M7 5v8h8"/>')}</button><span class="divider"></span><button id="screenshot" class="icon-button" title="导出 PNG 截图" aria-label="导出 PNG 截图">${svg('<path d="M4 10h7l2-4h6l2 4h7v16H4z"/><circle cx="16" cy="18" r="5"/>')}</button></div>
@@ -108,6 +109,8 @@ controls.rotateSpeed = 0.65; controls.zoomSpeed = 0.85; controls.screenSpacePann
 controls.minPolarAngle = 0.005; controls.maxPolarAngle = Math.PI - 0.005;
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 const group = new THREE.Group(); group.rotation.x = -Math.PI/2; scene.add(group);
+const initialOrientation = group.quaternion.clone();
+const calibratedCases = new WeakMap<LocalCase,THREE.Quaternion>();
 type Model = { id: number; name: string; jaw: 'upper'|'lower'|'other'; enabled: boolean; mesh: THREE.Mesh<THREE.BufferGeometry,THREE.MeshStandardMaterial>; triangles: number; source: THREE.BufferGeometry; refined?: THREE.BufferGeometry; topology?: ReturnType<typeof objTopology>; pendingResult?: unknown; refinementUrl?: string; teeth?: ToothAnnotation[];faceLabels?:Uint16Array;editable?:EditableJaw };
 const models: Model[] = []; let nextId = 0; let activeView = 'front'; let radius = 60; let toastTimer = 0; let loading = 0; let pendingFit = false;
 let localResults=false;let localCases:LocalCase[]=[];let importErrors:string[]=[];
@@ -160,8 +163,47 @@ function fit() {
   controls.target.copy(center); camera.position.copy(center).addScaledVector(direction,distance); camera.near=Math.max(distance/100000,0.00001); camera.far=Math.max(size.length()*10,radius*100); camera.zoom=1; resize(); controls.update();
   $('dimensions').textContent = size.toArray().map(v=>v.toFixed(1)).join(' × ')+' · 模型单位';
 }
-const directions: Record<string,number[]> = { front:[0,0,1],right:[1,0,0],left:[-1,0,0],back:[0,0,-1],upper:[0,-1,0.001],lower:[0,1,0.001],oblique:[0,-0.55,1] };
+// The display group maps each case's anatomical front/up to +Z/+Y.
+// Patient right is -X; both jaws receive the same rigid display rotation.
+const directions: Record<string,number[]> = { front:[0,0,1],right:[-1,0,0],left:[1,0,0],back:[0,0,-1],upper:[0,-1,0.001],lower:[0,1,0.001],oblique:[0,-0.55,1] };
 function setView(id: string) { activeView=id; const d=directions[id]; controls.enableDamping=false;controls.update();camera.up.set(0,1,0);camera.position.copy(controls.target).add(new THREE.Vector3(...d).normalize().multiplyScalar(radius*4)); controls.update();controls.enableDamping=true; document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>{const active=b.dataset.view===id;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active));}); fit(); }
+function applyCaseOrientation() {
+  const mode=$<HTMLSelectElement>('orientation').value;
+  if(mode!=='auto') {
+    group.rotation.set(mode==='z'?-Math.PI/2:0,0,0);
+    $('orientation-status').textContent='使用指定坐标轴，可旋转模型后设为正面';
+  } else {
+    const saved=localResults?calibratedCases.get(localCases[loadedCase]):undefined;
+    if(saved) {
+      group.quaternion.copy(saved);
+      $('orientation-status').textContent='已使用本次会话保存的正面校准';
+    } else {
+      const result=estimateArchFrame(models.map(model=>({positions:model.source.getAttribute('position').array,jaw:model.jaw})));
+      $('orientation-status').textContent=result.reason;
+      if(result.frame) {
+        const up=new THREE.Vector3(...result.frame.up),front=new THREE.Vector3(...result.frame.front);
+        const basis=new THREE.Matrix4().makeBasis(up.clone().cross(front).normalize(),up,front);
+        group.quaternion.setFromRotationMatrix(basis).invert();
+      } else {
+        group.rotation.set(-Math.PI/2,0,0);
+        toast(result.reason);
+      }
+    }
+  }
+  initialOrientation.copy(group.quaternion);setView('front');
+}
+function calibrateFront() {
+  if(!models.length){toast('请先加载牙模');return;}
+  controls.enableDamping=false;controls.update();camera.updateMatrixWorld();
+  const front=camera.position.clone().sub(controls.target).normalize();
+  const up=new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld,1).normalize();
+  const rotation=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(up.clone().cross(front),up,front)).invert();
+  group.quaternion.premultiply(rotation);initialOrientation.copy(group.quaternion);
+  $<HTMLSelectElement>('orientation').value='auto';
+  if(localResults && localCases[loadedCase])calibratedCases.set(localCases[loadedCase],group.quaternion.clone());
+  $('orientation-status').textContent='已将当前视角设为正面（本次会话有效）';
+  setView('front');toast('正面已校准，所有快速视角同步更新');
+}
 renderer.domElement.addEventListener('pointerdown',event=>{if(event.button===0&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey)document.querySelectorAll('[data-view]').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-pressed','false');});});
 function applyVisibility() { const filter=$<HTMLSelectElement>('filter').value; for(const model of models) model.mesh.visible=model.enabled&&(filter==='all'||model.jaw===filter); const visible=models.filter(m=>m.mesh.visible); $('status').textContent = loading ? '正在读取模型…' : visible.length ? `${visible.length} 个模型 · ${visible.reduce((s,m)=>s+m.triangles,0).toLocaleString()} 个三角面` : models.length ? '当前筛选下没有可见模型' : '等待选择数据文件夹'; $('empty').hidden=!!models.length || !!loading; }
 function renderList() {
@@ -192,15 +234,18 @@ const importFiles = createModelImporter({
   onStart: () => {
     segmentationGeneration++;segmentationAbort?.abort();segmentationRunning=false;segmentationMessage='';showToothNumbers=false;importErrors=[];
     loading=1;pendingFit=false;
+    $('orientation-status').textContent='正在读取模型，完成后识别牙弓方向';
+    $<HTMLButtonElement>('calibrate-front').disabled=true;$<HTMLButtonElement>('auto-orient').disabled=true;
     $('dimensions').textContent='模型坐标单位';
     $('toast').hidden=true;clearTimeout(toastTimer);
     selectStep(steps[0]);renderList();
   },
   onFinish: added => {
     loading=0;
+    $<HTMLButtonElement>('calibrate-front').disabled=!added;$<HTMLButtonElement>('auto-orient').disabled=!added;
     if(added)$<HTMLSelectElement>('filter').value='all';
     if(localResults)segmentationMessage=importErrors.length?`本地结果加载失败：${importErrors.join('；')}`:'';
-    renderList();fit();
+    renderList();if(added)applyCaseOrientation();else fit();
     if(added)void runSegmentation();
   },
   onError: message=>{importErrors.push(message);toast(message);},
@@ -242,8 +287,10 @@ for(const id of ['preloaded-import','empty-preloaded']) $(id).onclick=loadPreloa
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b=>b.onclick=()=>setView(b.dataset.view!));
 $('filter').onchange=()=>{applyVisibility();fit();};
 $('panel-toggle').onclick=()=>{$('panel').hidden=!$('panel').hidden;};
-$('fit').onclick=fit;$('reset').onclick=()=>{group.rotation.set($<HTMLSelectElement>('orientation').value==='z'?-Math.PI/2:0,0,0);setView('front');};
-$('orientation').onchange=()=>{group.rotation.set($<HTMLSelectElement>('orientation').value==='z'?-Math.PI/2:0,0,0);setView(activeView);};
+$('fit').onclick=fit;$('reset').onclick=()=>{group.quaternion.copy(initialOrientation);setView('front');};
+$('orientation').onchange=applyCaseOrientation;
+$('calibrate-front').onclick=calibrateFront;
+$('auto-orient').onclick=()=>{if(!models.length){toast('请先加载牙模');return;}if(localResults&&localCases[loadedCase])calibratedCases.delete(localCases[loadedCase]);$<HTMLSelectElement>('orientation').value='auto';applyCaseOrientation();};
 document.querySelectorAll<HTMLButtonElement>('[data-rotate]').forEach(b=>b.onclick=()=>{group.rotateOnWorldAxis(new THREE.Vector3(b.dataset.rotate==='x'?1:0,b.dataset.rotate==='y'?1:0,b.dataset.rotate==='z'?1:0),Math.PI/2);fit();});
 $('surface').onchange=()=>{for(const m of models){m.mesh.material.flatShading=$<HTMLSelectElement>('surface').value==='flat';m.mesh.material.wireframe=$<HTMLSelectElement>('surface').value==='wire';m.mesh.material.needsUpdate=true;}};
 $('opacity').oninput=()=>{const value=Number($<HTMLInputElement>('opacity').value);$('opacity-value').textContent=value+'%';for(const m of models){m.mesh.material.opacity=value/100;m.mesh.material.transparent=value<100;m.mesh.material.depthWrite=value===100;}};

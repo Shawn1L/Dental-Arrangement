@@ -164,5 +164,3 @@ def partition(vertices, faces, ids, fields):
               'max_source_reconstruction_error': float(np.max(np.abs(positions-reconstruction))),
               'tooth_and_gum_areas': areas}
     return positions, np.concatenate(output_normals), np.asarray(face_labels, dtype=np.uint16), source_faces, barycentrics, np.asarray(boundary_segments).reshape(-1,2,3), report
-
-
