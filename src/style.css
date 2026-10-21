@@ -57,7 +57,7 @@
 .adjustment-stage #segmentation-actions,.adjustment-stage #segmentation-hints,.adjustment-stage .jaw-select,.adjustment-stage .feature-bar button{display:none}
 .adjustment-stage .views{left:calc((100% - 312px)/2);gap:4px}
 .adjustment-stage #viewport{right:312px}
-.adjustment-stage .feature-bar:after{content:'左键选择 / 编辑　·　右键旋转　·　中键平移　·　滚轮缩放';align-self:center;margin-left:24px;color:#c9cdd2;font-size:12px}
+.adjustment-stage .feature-bar:after{content:'左键旋转 / 选择 / 编辑　·　中键 / 滚轮缩放　·　右键平移';align-self:center;margin-left:24px;color:#c9cdd2;font-size:12px}
 #adjustment{position:absolute;right:0;top:0;bottom:0;width:312px;background:#fff;border-left:1px solid #e2e6ec;padding:24px;display:flex;flex-direction:column;gap:14px;overflow:auto}
 .edit-heading,.picker-heading{display:flex;align-items:center;justify-content:space-between;font-size:16px}.edit-heading button{font-size:13px;color:#6d7782}
 .edit-progress{display:flex;list-style:none;padding:0;margin:12px 0 6px;gap:8px;counter-reset:edit-step}.edit-progress li{flex:1;font-size:10px;color:#9da7b1;text-align:center;counter-increment:edit-step}.edit-progress li:before{content:counter(edit-step);display:grid;place-items:center;width:24px;height:24px;margin:0 auto 8px;border-radius:50%;background:#eef1f5;color:#a3aab4}.edit-progress .active{color:#2e91ef}.edit-progress .active:before,.edit-progress .complete:before{background:#459df3;color:white}

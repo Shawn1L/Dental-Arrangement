@@ -1,5 +1,5 @@
 export type Region = { number:number|null; mark:'B'|'I'|null };
-export type BoundaryLoop = { vertices:number[]; closed:boolean };
+export type BoundaryLoop = { key?:number; vertices:number[]; closed:boolean };
 export type EditableJaw = {
   positions:Float32Array; labels:Uint32Array; regions:Record<number,Region>;
   vertices:number[][]; faces:Uint32Array; centers:Float32Array; areas:Float64Array;
@@ -14,7 +14,8 @@ export function deleteRegion(jaw:EditableJaw,key:number):void;
 export function insidePolygon(x:number,y:number,polygon:number[][]):boolean;
 export function applyLasso(jaw:EditableJaw,key:number,polygon:number[][],subtract:boolean,project:(p:Float32Array)=>number[]):boolean;
 export function boundaryLoops(jaw:EditableJaw,key:number):BoundaryLoop[];
-export function controlIndices(jaw:EditableJaw,loop:BoundaryLoop,spacing?:number):number[];
+export function prepareBoundaryControls(jaw:EditableJaw,loops?:BoundaryLoop[]):void;
+export function controlIndices(jaw:EditableJaw,loop:BoundaryLoop):number[];
 export function boundaryReplacement(jaw:EditableJaw,loop:BoundaryLoop,index:number,target:number[]):number[]|false;
 export function moveBoundary(jaw:EditableJaw,key:number,loop:BoundaryLoop,index:number,target:number[],separate?:boolean):boolean;
 export class EditSession {
